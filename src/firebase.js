@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDw4o2yLQtYlKVW1wDDFCuidBAHMxt6czQ",
@@ -12,4 +12,13 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// Offline persistence: Firestore caches reads/writes in IndexedDB and
+// queues writes made while offline, syncing them automatically once
+// connectivity returns — this is what makes "usable with no internet,
+// syncs when back online" work, without any custom sync code.
+// persistentMultipleTabManager lets it work correctly if the board is
+// open in more than one browser tab at once on the same device.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
