@@ -3,7 +3,7 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw
+  Archive, RotateCcw, Layers
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
@@ -110,6 +110,29 @@ function normalizeIncident(inc) {
     return { ...inc, wind: "", temp: "", rh: "", conditions: inc.weather };
   }
   return { wind: "", temp: "", rh: "", conditions: "", ...inc };
+}
+
+// Default shapes for the newer ICS Forms (208 / 208 HM / 209 / 206) —
+// factory functions so each call returns a fresh object/array, not a
+// shared reference, since 206 in particular holds mutable arrays.
+function defaultIcs208() {
+  return { opFrom: "", opTo: "", message: "", preparedBy: "", position: "", signature: "", dateTime: "" };
+}
+function defaultIcs208HM() {
+  return {
+    entryObjectives: "", hazards: "", ppeExclusion: "", ppeContamReduction: "", ppeSupport: "",
+    communications: "", decon: "", emergencyProcedures: "", siteSafetyOfficer: "", signature: "", dateTime: "",
+  };
+}
+function defaultIcs209() {
+  return {
+    dateTime: "", opFrom: "", opTo: "", situationSummary: "", resourcesSummary: "", threatSummary: "",
+    expectedEvents: "", injuries: "", structuresThreatened: "", structuresDamaged: "",
+    cooperatingAgencies: "", weather: "", preparedBy: "",
+  };
+}
+function defaultIcs206() {
+  return { aidStations: [], ambulances: [], hospitals: [], procedures: "", preparedBy: "", reviewedBy: "" };
 }
 
 /* ============================================================
@@ -554,6 +577,271 @@ function TabRehab({ rehab, setRehab, resources, now }) {
 /* ============================================================
    TAB: ICS-214 ACTIVITY LOG
    ============================================================ */
+/* ============================================================
+   TAB: ICS-208 · SAFETY MESSAGE/PLAN
+   ============================================================ */
+function Tab208({ ics208, setIcs208, incident }) {
+  const set = (patch) => setIcs208({ ...ics208, ...patch });
+  return (
+    <Panel title="ICS-208 · Safety Message / Plan" icon={AlertTriangle}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
+        <Field label="Date / Time Prepared"><TextInput value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <Field label="Operational Period From"><TextInput value={ics208.opFrom} onChange={e => set({ opFrom: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+        <Field label="Operational Period To"><TextInput value={ics208.opTo} onChange={e => set({ opTo: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Field label="Safety Message / Plan / Expanded Safety Advisement" wide>
+          <TextArea value={ics208.message} onChange={e => set({ message: e.target.value })} style={{ minHeight: 140 }}
+            placeholder="Expanded safety guidance beyond the ICS-201 safety message — site-specific hazards, PPE requirements, weather-driven precautions, applicable safe operating procedures..." />
+        </Field>
+      </div>
+      <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>Prepared By (Safety Officer)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+        <Field label="Name"><TextInput value={ics208.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
+        <Field label="Position / Title"><TextInput value={ics208.position} onChange={e => set({ position: e.target.value })} placeholder="Safety Officer" /></Field>
+        <Field label="Signature"><TextInput value={ics208.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
+        <Field label="Date / Time"><TextInput value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
+      </div>
+    </Panel>
+  );
+}
+
+/* ============================================================
+   TAB: ICS-208 HM · SITE SAFETY PLAN (HAZMAT)
+   ============================================================ */
+function Tab208HM({ ics208hm, setIcs208hm, incident }) {
+  const set = (patch) => setIcs208hm({ ...ics208hm, ...patch });
+  return (
+    <Panel title="ICS-208 HM · Site Safety Plan (HazMat)" icon={AlertTriangle}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
+        <Field label="Entry Objectives"><TextInput value={ics208hm.entryObjectives} onChange={e => set({ entryObjectives: e.target.value })} placeholder="Recon, product ID, leak control..." /></Field>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Field label="Hazards (Chemical / Physical / Biological / Radiological)" wide>
+          <TextArea value={ics208hm.hazards} onChange={e => set({ hazards: e.target.value })} style={{ minHeight: 70 }} />
+        </Field>
+      </div>
+      <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Levels of Protection by Zone</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <Field label="Exclusion Zone (Hot)"><TextInput value={ics208hm.ppeExclusion} onChange={e => set({ ppeExclusion: e.target.value })} placeholder="Level A" /></Field>
+        <Field label="Contamination Reduction (Warm)"><TextInput value={ics208hm.ppeContamReduction} onChange={e => set({ ppeContamReduction: e.target.value })} placeholder="Level B" /></Field>
+        <Field label="Support Zone (Cold)"><TextInput value={ics208hm.ppeSupport} onChange={e => set({ ppeSupport: e.target.value })} placeholder="Level D" /></Field>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <Field label="Site Communications"><TextInput value={ics208hm.communications} onChange={e => set({ communications: e.target.value })} placeholder="On-site radio channel" /></Field>
+        <Field label="Decontamination Procedures"><TextInput value={ics208hm.decon} onChange={e => set({ decon: e.target.value })} /></Field>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Field label="Emergency / Medical Procedures" wide>
+          <TextArea value={ics208hm.emergencyProcedures} onChange={e => set({ emergencyProcedures: e.target.value })} style={{ minHeight: 70 }} />
+        </Field>
+      </div>
+      <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>Site Safety Officer Approval</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <Field label="Name"><TextInput value={ics208hm.siteSafetyOfficer} onChange={e => set({ siteSafetyOfficer: e.target.value })} /></Field>
+        <Field label="Signature"><TextInput value={ics208hm.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
+        <Field label="Date / Time"><TextInput value={ics208hm.dateTime} onChange={e => set({ dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+      </div>
+    </Panel>
+  );
+}
+
+/* ============================================================
+   TAB: ICS-209 · INCIDENT STATUS SUMMARY
+   ============================================================ */
+function Tab209({ ics209, setIcs209, incident }) {
+  const set = (patch) => setIcs209({ ...ics209, ...patch });
+  return (
+    <Panel title="ICS-209 · Incident Status Summary" icon={ClipboardList}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
+        <Field label="Incident Number"><TextInput value={incident.number} disabled style={{ opacity: 0.65 }} /></Field>
+        <Field label="Date / Time of Report"><TextInput value={ics209.dateTime} onChange={e => set({ dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+        <Field label="Incident Commander"><TextInput value={incident.icName} disabled style={{ opacity: 0.65 }} /></Field>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <Field label="Operational Period From"><TextInput value={ics209.opFrom} onChange={e => set({ opFrom: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+        <Field label="Operational Period To"><TextInput value={ics209.opTo} onChange={e => set({ opTo: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Field label="Current Situation Summary (size, % contained, area involved)" wide>
+          <TextArea value={ics209.situationSummary} onChange={e => set({ situationSummary: e.target.value })} style={{ minHeight: 80 }} />
+        </Field>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Field label="Resources Summary (committed / ordered)" wide>
+          <TextArea value={ics209.resourcesSummary} onChange={e => set({ resourcesSummary: e.target.value })} style={{ minHeight: 60 }} />
+        </Field>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Field label="Life / Safety / Property / Environmental Threat Summary" wide>
+          <TextArea value={ics209.threatSummary} onChange={e => set({ threatSummary: e.target.value })} style={{ minHeight: 60 }} />
+        </Field>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Field label="Significant Events Expected Next Operational Period" wide>
+          <TextArea value={ics209.expectedEvents} onChange={e => set({ expectedEvents: e.target.value })} style={{ minHeight: 60 }} />
+        </Field>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+        <Field label="Injuries / Fatalities"><TextInput value={ics209.injuries} onChange={e => set({ injuries: e.target.value })} /></Field>
+        <Field label="Structures Threatened"><TextInput value={ics209.structuresThreatened} onChange={e => set({ structuresThreatened: e.target.value })} /></Field>
+        <Field label="Structures Damaged / Destroyed"><TextInput value={ics209.structuresDamaged} onChange={e => set({ structuresDamaged: e.target.value })} /></Field>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <Field label="Cooperating / Assisting Agencies"><TextInput value={ics209.cooperatingAgencies} onChange={e => set({ cooperatingAgencies: e.target.value })} /></Field>
+        <Field label="Weather"><TextInput value={ics209.weather} onChange={e => set({ weather: e.target.value })} /></Field>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Field label="Prepared By"><TextInput value={ics209.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
+      </div>
+    </Panel>
+  );
+}
+
+/* ============================================================
+   TAB: ICS-206 · MEDICAL PLAN
+   ============================================================ */
+function Tab206({ ics206, setIcs206 }) {
+  const cell = { padding: "6px 6px", fontSize: 12.5 };
+  const addRow = (key, row) => setIcs206({ ...ics206, [key]: [...ics206[key], row] });
+  const updateRow = (key, id, patch) => setIcs206({ ...ics206, [key]: ics206[key].map(r => r.id === id ? { ...r, ...patch } : r) });
+  const removeRow = (key, id) => setIcs206({ ...ics206, [key]: ics206[key].filter(r => r.id !== id) });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Panel title="ICS-206 · Medical Aid Stations" icon={HeartPulse}
+        right={<Btn kind="subtle" icon={Plus} onClick={() => addRow("aidStations", { id: uid(), name: "", location: "", paramedic: "No" })}>Add Station</Btn>}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+            <th style={cell}>Name</th><th style={cell}>Location</th><th style={cell}>Paramedic On-Site</th><th style={cell}></th>
+          </tr></thead>
+          <tbody>
+            {ics206.aidStations.map(r => (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={cell}><TextInput value={r.name} onChange={e => updateRow("aidStations", r.id, { name: e.target.value })} style={{ width: 140 }} /></td>
+                <td style={cell}><TextInput value={r.location} onChange={e => updateRow("aidStations", r.id, { location: e.target.value })} style={{ width: 180 }} /></td>
+                <td style={cell}>
+                  <Select value={r.paramedic} onChange={e => updateRow("aidStations", r.id, { paramedic: e.target.value })} style={{ width: 90 }}>
+                    <option>Yes</option><option>No</option>
+                  </Select>
+                </td>
+                <td style={cell}><button onClick={() => removeRow("aidStations", r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {ics206.aidStations.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
+      </Panel>
+
+      <Panel title="Ambulance Services" icon={Truck}
+        right={<Btn kind="subtle" icon={Plus} onClick={() => addRow("ambulances", { id: uid(), name: "", phone: "", level: "ALS" })}>Add Service</Btn>}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+            <th style={cell}>Service Name</th><th style={cell}>Phone</th><th style={cell}>Level</th><th style={cell}></th>
+          </tr></thead>
+          <tbody>
+            {ics206.ambulances.map(r => (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={cell}><TextInput value={r.name} onChange={e => updateRow("ambulances", r.id, { name: e.target.value })} style={{ width: 180 }} /></td>
+                <td style={cell}><TextInput value={r.phone} onChange={e => updateRow("ambulances", r.id, { phone: e.target.value })} style={{ width: 130 }} /></td>
+                <td style={cell}>
+                  <Select value={r.level} onChange={e => updateRow("ambulances", r.id, { level: e.target.value })} style={{ width: 90 }}>
+                    <option>ALS</option><option>BLS</option>
+                  </Select>
+                </td>
+                <td style={cell}><button onClick={() => removeRow("ambulances", r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {ics206.ambulances.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
+      </Panel>
+
+      <Panel title="Hospitals" icon={Shield}
+        right={<Btn kind="subtle" icon={Plus} onClick={() => addRow("hospitals", { id: uid(), name: "", phone: "", travelTime: "", trauma: "", burn: "No", helipad: "No" })}>Add Hospital</Btn>}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+            <th style={cell}>Name</th><th style={cell}>Phone</th><th style={cell}>Travel Time</th><th style={cell}>Trauma Lvl</th><th style={cell}>Burn Ctr</th><th style={cell}>Helipad</th><th style={cell}></th>
+          </tr></thead>
+          <tbody>
+            {ics206.hospitals.map(r => (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={cell}><TextInput value={r.name} onChange={e => updateRow("hospitals", r.id, { name: e.target.value })} style={{ width: 150 }} /></td>
+                <td style={cell}><TextInput value={r.phone} onChange={e => updateRow("hospitals", r.id, { phone: e.target.value })} style={{ width: 110 }} /></td>
+                <td style={cell}><TextInput value={r.travelTime} onChange={e => updateRow("hospitals", r.id, { travelTime: e.target.value })} style={{ width: 90 }} placeholder="15 min air" /></td>
+                <td style={cell}><TextInput value={r.trauma} onChange={e => updateRow("hospitals", r.id, { trauma: e.target.value })} style={{ width: 70 }} placeholder="Level I" /></td>
+                <td style={cell}>
+                  <Select value={r.burn} onChange={e => updateRow("hospitals", r.id, { burn: e.target.value })} style={{ width: 80 }}>
+                    <option>Yes</option><option>No</option>
+                  </Select>
+                </td>
+                <td style={cell}>
+                  <Select value={r.helipad} onChange={e => updateRow("hospitals", r.id, { helipad: e.target.value })} style={{ width: 80 }}>
+                    <option>Yes</option><option>No</option>
+                  </Select>
+                </td>
+                <td style={cell}><button onClick={() => removeRow("hospitals", r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {ics206.hospitals.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
+      </Panel>
+
+      <Panel title="Medical Emergency Procedures & Sign-off" icon={HeartPulse}>
+        <Field label="Medical Emergency Procedures" wide>
+          <TextArea value={ics206.procedures} onChange={e => setIcs206({ ...ics206, procedures: e.target.value })} style={{ minHeight: 70 }} />
+        </Field>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+          <Field label="Prepared By (Medical Unit Leader)"><TextInput value={ics206.preparedBy} onChange={e => setIcs206({ ...ics206, preparedBy: e.target.value })} /></Field>
+          <Field label="Reviewed By (Safety Officer)"><TextInput value={ics206.reviewedBy} onChange={e => setIcs206({ ...ics206, reviewedBy: e.target.value })} /></Field>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ICS FORMS — dropdown selector wrapping 205 / 215A / 208 /
+   208 HM / 209 / 206 / 214 so they share one tab slot instead of
+   six separate tabs across the header.
+   ============================================================ */
+const ICS_FORM_OPTIONS = [
+  { k: "205", label: "ICS-205 · Communications Plan" },
+  { k: "215a", label: "ICS-215A · Safety Analysis" },
+  { k: "208", label: "ICS-208 · Safety Message/Plan" },
+  { k: "208hm", label: "ICS-208 HM · Site Safety Plan (HazMat)" },
+  { k: "209", label: "ICS-209 · Incident Status Summary" },
+  { k: "206", label: "ICS-206 · Medical Plan" },
+  { k: "214", label: "ICS-214 · Activity Logs" },
+];
+
+function TabICSForms(props) {
+  const [selected, setSelected] = useState("205");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>Select Form</span>
+        <Select value={selected} onChange={e => setSelected(e.target.value)} style={{ maxWidth: 360, fontSize: 13 }}>
+          {ICS_FORM_OPTIONS.map(o => <option key={o.k} value={o.k}>{o.label}</option>)}
+        </Select>
+      </div>
+      {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} />}
+      {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
+      {selected === "208" && <Tab208 ics208={props.ics208} setIcs208={props.setIcs208} incident={props.incident} />}
+      {selected === "208hm" && <Tab208HM ics208hm={props.ics208hm} setIcs208hm={props.setIcs208hm} incident={props.incident} />}
+      {selected === "209" && <Tab209 ics209={props.ics209} setIcs209={props.setIcs209} incident={props.incident} />}
+      {selected === "206" && <Tab206 ics206={props.ics206} setIcs206={props.setIcs206} />}
+      {selected === "214" && <Tab214 logs={props.logs} setLogs={props.setLogs} />}
+    </div>
+  );
+}
+
 function Tab214({ logs, setLogs }) {
   const [activeLog, setActiveLog] = useState(logs[0]?.id || null);
   useEffect(() => { if (!logs.find(l => l.id === activeLog)) setActiveLog(logs[0]?.id || null); }, [logs]);
@@ -758,7 +1046,21 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
-function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs }) {
+  // Older saved/archived incidents predate these forms (or, in the
+  // archive-export path, skip the normal load/normalize step
+  // entirely) — fall back to blank defaults rather than throwing on
+  // a missing field.
+  incident = incident || blankIncident();
+  resources = resources || [];
+  comms = comms || [];
+  org = org || { positions: {}, divisions: [] };
+  safety = safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] };
+  ics208 = ics208 || defaultIcs208();
+  ics208hm = ics208hm || defaultIcs208HM();
+  ics209 = ics209 || defaultIcs209();
+  ics206 = ics206 || defaultIcs206();
+  logs = logs || [];
   const L = [];
   const push = (text, font = "H", size = 9) => L.push({ kind: "text", text, font, size });
   const blank = () => push("");
@@ -805,6 +1107,52 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
     safety.rows.map(r => [r.branch, r.division, r.hazards, r.mitigations])));
   push(`Prepared By: ${safety.preparedBy || "-"}   Position: ${safety.position || "-"}`);
   push(`Signature: ${safety.signature || "-"}   Date/Time: ${safety.dateTime || "-"}`);
+  blank();
+
+  heading(L, "ICS-208 · Safety Message/Plan");
+  push(`Operational Period: ${ics208.opFrom || "-"} to ${ics208.opTo || "-"}`, "H", 9);
+  blank();
+  wrapPush(L, ics208.message || "(none entered)");
+  push(`Prepared By: ${ics208.preparedBy || "-"}   Position: ${ics208.position || "-"}`);
+  push(`Signature: ${ics208.signature || "-"}   Date/Time: ${ics208.dateTime || "-"}`);
+  blank();
+
+  heading(L, "ICS-208 HM · Site Safety Plan (HazMat)");
+  push(`Entry Objectives: ${ics208hm.entryObjectives || "-"}`, "H", 9);
+  push("Hazards:", "HB", 9);
+  wrapPush(L, ics208hm.hazards || "(none entered)");
+  push(`PPE - Exclusion: ${ics208hm.ppeExclusion || "-"}   Contam. Reduction: ${ics208hm.ppeContamReduction || "-"}   Support: ${ics208hm.ppeSupport || "-"}`, "H", 9);
+  push(`Communications: ${ics208hm.communications || "-"}   Decon: ${ics208hm.decon || "-"}`, "H", 9);
+  push("Emergency/Medical Procedures:", "HB", 9);
+  wrapPush(L, ics208hm.emergencyProcedures || "(none entered)");
+  push(`Site Safety Officer: ${ics208hm.siteSafetyOfficer || "-"}   Signature: ${ics208hm.signature || "-"}   Date/Time: ${ics208hm.dateTime || "-"}`);
+  blank();
+
+  heading(L, "ICS-209 · Incident Status Summary");
+  push(`Date/Time of Report: ${ics209.dateTime || "-"}   Operational Period: ${ics209.opFrom || "-"} to ${ics209.opTo || "-"}`, "H", 9);
+  push("Situation Summary:", "HB", 9);
+  wrapPush(L, ics209.situationSummary || "(none entered)");
+  push("Resources Summary:", "HB", 9);
+  wrapPush(L, ics209.resourcesSummary || "(none entered)");
+  push("Threat Summary:", "HB", 9);
+  wrapPush(L, ics209.threatSummary || "(none entered)");
+  push("Expected Next-Period Events:", "HB", 9);
+  wrapPush(L, ics209.expectedEvents || "(none entered)");
+  push(`Injuries/Fatalities: ${ics209.injuries || "-"}   Structures Threatened: ${ics209.structuresThreatened || "-"}   Damaged/Destroyed: ${ics209.structuresDamaged || "-"}`, "H", 9);
+  push(`Cooperating Agencies: ${ics209.cooperatingAgencies || "-"}   Weather: ${ics209.weather || "-"}`, "H", 9);
+  push(`Prepared By: ${ics209.preparedBy || "-"}`);
+  blank();
+
+  heading(L, "ICS-206 · Medical Plan");
+  L.push(...tableLines(["STATION", "LOCATION", "PARAMEDIC"], [140, 220, 100],
+    ics206.aidStations.map(r => [r.name, r.location, r.paramedic]), "Medical Aid Stations"));
+  L.push(...tableLines(["SERVICE", "PHONE", "LEVEL"], [180, 150, 100],
+    ics206.ambulances.map(r => [r.name, r.phone, r.level]), "Ambulance Services"));
+  L.push(...tableLines(["HOSPITAL", "PHONE", "TRAVEL TIME", "TRAUMA", "BURN CTR", "HELIPAD"], [130, 110, 100, 80, 80, 80],
+    ics206.hospitals.map(r => [r.name, r.phone, r.travelTime, r.trauma, r.burn, r.helipad]), "Hospitals"));
+  push("Medical Emergency Procedures:", "HB", 9);
+  wrapPush(L, ics206.procedures || "(none entered)");
+  push(`Prepared By: ${ics206.preparedBy || "-"}   Reviewed By: ${ics206.reviewedBy || "-"}`);
   blank();
 
   heading(L, "ICS-214 · Activity Logs");
@@ -1315,9 +1663,7 @@ const TABS = [
   { k: "resources", label: "Resource Board", icon: Truck },
   { k: "org", label: "Org Chart", icon: Users },
   { k: "rehab", label: "Rehab", icon: HeartPulse },
-  { k: "comms", label: "ICS-205 Comms", icon: Radio },
-  { k: "215a", label: "ICS-215A Safety", icon: AlertTriangle },
-  { k: "214", label: "ICS-214 Logs", icon: ArrowRightLeft },
+  { k: "icsforms", label: "ICS Forms", icon: Layers },
 ];
 
 // Rendered at the very top of the tree, outside PinGate, so the dark
@@ -1391,6 +1737,10 @@ function AppInner({ onLock }) {
   const [org, setOrg] = useState({ positions: {}, divisions: [] });
   const [comms, setComms] = useState([]);
   const [safety, setSafety] = useState({ opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
+  const [ics208, setIcs208] = useState(defaultIcs208());
+  const [ics208hm, setIcs208hm] = useState(defaultIcs208HM());
+  const [ics209, setIcs209] = useState(defaultIcs209());
+  const [ics206, setIcs206] = useState(defaultIcs206());
   const [rehab, setRehab] = useState([]);
   const [logs, setLogs] = useState([]);
 
@@ -1418,6 +1768,10 @@ function AppInner({ onLock }) {
     setOrg(blob.org || { positions: {}, divisions: [] });
     setComms(blob.comms || []);
     setSafety(blob.safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
+    setIcs208(blob.ics208 || defaultIcs208());
+    setIcs208hm(blob.ics208hm || defaultIcs208HM());
+    setIcs209(blob.ics209 || defaultIcs209());
+    setIcs206(blob.ics206 || defaultIcs206());
     setRehab(blob.rehab || []);
     setLogs(blob.logs || []);
     if (markSynced) lastKnownUpdatedAt.current = blob.updatedAt || null;
@@ -1431,7 +1785,7 @@ function AppInner({ onLock }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const updatedAt = nowISO();
-      const blob = { incident, resources, org, comms, safety, rehab, logs, updatedAt };
+      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, updatedAt };
       const ok = await saveIncidentBlob(incident.id, blob);
       const meta = { id: incident.id, name: incident.name, type: incident.type, savedAt: updatedAt };
       const nextIndex = [meta, ...index.filter(i => i.id !== incident.id)];
@@ -1443,7 +1797,7 @@ function AppInner({ onLock }) {
     }, 900);
     return () => clearTimeout(saveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident, resources, org, comms, safety, rehab, logs, ready, incidentLoaded]);
+  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, ready, incidentLoaded]);
 
   // real-time: subscribe to this incident's Firestore doc so other
   // users' changes appear here immediately, no polling needed.
@@ -1460,7 +1814,7 @@ function AppInner({ onLock }) {
   }, [ready, incidentLoaded, incident.id]);
 
   const startNew = () => {
-    applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: [], safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, rehab: [], logs: [] });
+    applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: [], safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [] });
     setIncidentLoaded(true);
     setShowLib(false);
   };
@@ -1543,7 +1897,7 @@ function AppInner({ onLock }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, logs })}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs })}>Print / Export</Btn>
               <Btn kind="ghost" onClick={() => setShowChangePin(true)} style={{ padding: "6px 9px", fontSize: 12 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 9px", fontSize: 12 }}>Lock</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
@@ -1579,9 +1933,18 @@ function AppInner({ onLock }) {
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
-              {tab === "comms" && <TabComms comms={comms} setComms={setComms} />}
-              {tab === "215a" && <Tab215A safety={safety} setSafety={setSafety} org={org} incident={incident} />}
-              {tab === "214" && <Tab214 logs={logs} setLogs={setLogs} />}
+              {tab === "icsforms" && (
+                <TabICSForms
+                  comms={comms} setComms={setComms}
+                  safety={safety} setSafety={setSafety}
+                  org={org} incident={incident}
+                  ics208={ics208} setIcs208={setIcs208}
+                  ics208hm={ics208hm} setIcs208hm={setIcs208hm}
+                  ics209={ics209} setIcs209={setIcs209}
+                  ics206={ics206} setIcs206={setIcs206}
+                  logs={logs} setLogs={setLogs}
+                />
+              )}
             </>
           )}
         </div>
