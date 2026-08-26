@@ -1346,8 +1346,9 @@ function AppInner({ onLock }) {
                   offline — changes will sync when reconnected
                 </span>
               )}
-              <span style={{ fontSize: 11, color: saveState === "synced" ? COLORS.teal : COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>
-                {saveState === "saving" ? "saving…" : saveState === "synced" ? "● updated by another user" : saveState === "saved" ? "● synced to shared board" : ""}
+              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
+                synced to shared board
               </span>
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, logs })}>Print / Export</Btn>
