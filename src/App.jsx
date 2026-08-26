@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
-  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock
+  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
@@ -89,11 +89,26 @@ function blankIncident() {
     icName: "",
     preparedBy: "",
     opStart: nowISO(),
-    weather: "",
+    wind: "",
+    temp: "",
+    rh: "",
+    conditions: "",
     situation: "",
     safetyMessage: "",
     objectives: [""],
   };
+}
+
+// Older saved incidents may only have the single combined "weather"
+// field from before it was split into Wind/Temp/RH/Conditions — carry
+// that text into Conditions once, rather than silently losing it.
+function normalizeIncident(inc) {
+  if (!inc) return blankIncident();
+  const hasNewFields = inc.wind || inc.temp || inc.rh || inc.conditions;
+  if (!hasNewFields && inc.weather) {
+    return { ...inc, wind: "", temp: "", rh: "", conditions: inc.weather };
+  }
+  return { wind: "", temp: "", rh: "", conditions: "", ...inc };
 }
 
 /* ============================================================
@@ -193,7 +208,12 @@ function Tab201({ incident, setIncident, resources }) {
           <Field label="Location"><TextInput value={incident.location} onChange={e => setIncident({ ...incident, location: e.target.value })} placeholder="Address / cross streets / lat-long" /></Field>
           <Field label="Incident Commander"><TextInput value={incident.icName} onChange={e => setIncident({ ...incident, icName: e.target.value })} /></Field>
           <Field label="Prepared By"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
-          <Field label="Weather / Conditions" wide><TextInput value={incident.weather} onChange={e => setIncident({ ...incident, weather: e.target.value })} placeholder="Wind, temp, RH, fuel/smoke conditions..." /></Field>
+          <Field label="Wind"><TextInput value={incident.wind} onChange={e => setIncident({ ...incident, wind: e.target.value })} placeholder="8 mph SW" /></Field>
+          <Field label="Temp"><TextInput value={incident.temp} onChange={e => setIncident({ ...incident, temp: e.target.value })} placeholder="72°F" /></Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+          <Field label="RH"><TextInput value={incident.rh} onChange={e => setIncident({ ...incident, rh: e.target.value })} placeholder="45%" /></Field>
+          <Field label="Conditions"><TextInput value={incident.conditions} onChange={e => setIncident({ ...incident, conditions: e.target.value })} placeholder="Clear, smoke visible..." /></Field>
           <Field label="Current Situation Summary" wide><TextArea value={incident.situation} onChange={e => setIncident({ ...incident, situation: e.target.value })} /></Field>
           <Field label="Safety Message" wide><TextArea value={incident.safetyMessage} onChange={e => setIncident({ ...incident, safetyMessage: e.target.value })} /></Field>
         </div>
@@ -252,7 +272,7 @@ function ResourceForm({ onAdd }) {
   );
 }
 
-function ResourceCard({ r, onMove, onUpdate, onRemove, now }) {
+function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging }) {
   const [editing, setEditing] = useState(false);
   const nextOptions = STATUS_FLOW.filter(s => s !== r.status);
   // Once released, the timer stops accruing — freeze it at the moment
@@ -262,11 +282,20 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now }) {
   // right before it came in — a static duration, not a live timer.
   const prior = r.status === "Rehab" ? priorPeriod(r.history) : null;
   return (
-    <div style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${STATUS_COLOR[r.status]}`, borderRadius: 5, padding: 10, marginBottom: 8 }}>
+    <div style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${STATUS_COLOR[r.status]}`, borderRadius: 5, padding: 10, marginBottom: 8, opacity: isDragging ? 0.35 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-        <div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{r.label}</div>
-          <div style={{ fontSize: 11.5, color: COLORS.muted }}>{r.kind} · {r.personnel} pers.</div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+          <span
+            {...dragProps}
+            title="Drag to move"
+            style={{ cursor: "grab", touchAction: "none", color: COLORS.faint, marginTop: 2, flexShrink: 0 }}
+          >
+            <GripVertical size={14} />
+          </span>
+          <div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{r.label}</div>
+            <div style={{ fontSize: 11.5, color: COLORS.muted }}>{r.kind} · {r.personnel} pers.</div>
+          </div>
         </div>
         <button onClick={() => onRemove(r.id)} title="Remove" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={13} /></button>
       </div>
@@ -299,10 +328,43 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now }) {
 }
 
 function TabResources({ resources, setResources, now }) {
+  // Drag state lives here (not per-card) since the floating preview and
+  // column highlight need to render across the whole board. Built on
+  // the Pointer Events API + elementFromPoint rather than native HTML5
+  // drag-and-drop, because HTML5 DnD is unreliable on touch devices —
+  // this app needs to work on iPads and phones, not just desktop mice.
+  const [drag, setDrag] = useState(null); // { id, x, y, overStatus }
+
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
   const moveResource = (id, status) => setResources(resources.map(r => r.id === id ? { ...r, status, statusSince: nowISO(), history: [...r.history, { status, at: nowISO() }] } : r));
   const updateResource = (id, patch) => setResources(resources.map(r => r.id === id ? { ...r, ...patch } : r));
+
+  const columnStatusAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const colEl = el && el.closest("[data-column-status]");
+    return colEl ? colEl.getAttribute("data-column-status") : null;
+  };
+
+  const handlePointerDown = (r, e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({ id: r.id, x: e.clientX, y: e.clientY, overStatus: r.status });
+  };
+  const handlePointerMove = (e) => {
+    setDrag(d => d ? { ...d, x: e.clientX, y: e.clientY, overStatus: columnStatusAt(e.clientX, e.clientY) } : d);
+  };
+  const endDrag = (e, commit) => {
+    setDrag(d => {
+      if (d && commit) {
+        const target = columnStatusAt(e.clientX, e.clientY);
+        if (target && target !== resources.find(r => r.id === d.id)?.status) moveResource(d.id, target);
+      }
+      return null;
+    });
+  };
+
+  const draggingResource = drag ? resources.find(r => r.id === drag.id) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -312,18 +374,43 @@ function TabResources({ resources, setResources, now }) {
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(190px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
           const items = resources.filter(r => r.status === status);
+          const isOver = drag && drag.overStatus === status && drag.id && resources.find(r => r.id === drag.id)?.status !== status;
           return (
-            <div key={status} style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderTop: `3px solid ${STATUS_COLOR[status]}`, borderRadius: 6, padding: 10, minHeight: 200 }}>
+            <div key={status} data-column-status={status} style={{
+              background: COLORS.panel, border: `1px solid ${isOver ? STATUS_COLOR[status] : COLORS.line}`,
+              borderTop: `3px solid ${STATUS_COLOR[status]}`, borderRadius: 6, padding: 10, minHeight: 200,
+              boxShadow: isOver ? `0 0 0 2px ${STATUS_COLOR[status]}` : "none", transition: "box-shadow 0.1s",
+            }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 12.5 }}>{status}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.muted }}>{items.length}</span>
               </div>
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
-              {items.map(r => <ResourceCard key={r.id} r={r} onMove={moveResource} onUpdate={updateResource} onRemove={removeResource} now={now} />)}
+              {items.map(r => (
+                <ResourceCard key={r.id} r={r} onMove={moveResource} onUpdate={updateResource} onRemove={removeResource} now={now}
+                  isDragging={drag && drag.id === r.id}
+                  dragProps={{
+                    onPointerDown: (e) => handlePointerDown(r, e),
+                    onPointerMove: handlePointerMove,
+                    onPointerUp: (e) => endDrag(e, true),
+                    onPointerCancel: (e) => endDrag(e, false),
+                  }}
+                />
+              ))}
             </div>
           );
         })}
       </div>
+      {drag && draggingResource && (
+        <div style={{
+          position: "fixed", left: drag.x + 14, top: drag.y - 16, width: 150, pointerEvents: "none", zIndex: 200,
+          background: COLORS.panel2, border: `2px solid ${STATUS_COLOR[draggingResource.status]}`, borderRadius: 5,
+          padding: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+        }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 13 }}>{draggingResource.label}</div>
+          <div style={{ fontSize: 10.5, color: COLORS.muted }}>{draggingResource.kind}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -678,7 +765,8 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   push(`Incident #: ${incident.number || "-"}   Type: ${incident.type || "-"}`, "H", 10);
   push(`Location: ${incident.location || "-"}`, "H", 10);
   push(`IC: ${incident.icName || "-"}   Prepared By: ${incident.preparedBy || "-"}`, "H", 10);
-  push(`Weather: ${incident.weather || "-"}`, "H", 10);
+  push(`Wind: ${incident.wind || "-"}   Temp: ${incident.temp || "-"}   RH: ${incident.rh || "-"}`, "H", 10);
+  push(`Conditions: ${incident.conditions || "-"}`, "H", 10);
   blank();
 
   heading(L, "ICS-201 · Incident Briefing");
@@ -909,7 +997,8 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
       <p><b>Incident:</b> {incident.name} &nbsp; <b>#</b> {incident.number} &nbsp; <b>Type:</b> {incident.type}</p>
       <p><b>Location:</b> {incident.location}</p>
       <p><b>IC:</b> {incident.icName} &nbsp; <b>Prepared By:</b> {incident.preparedBy} &nbsp; <b>Op Period Start:</b> {fmtClock(incident.opStart)} {fmtDate(incident.opStart)}</p>
-      <p><b>Weather:</b> {incident.weather}</p>
+      <p><b>Wind:</b> {incident.wind} &nbsp; <b>Temp:</b> {incident.temp} &nbsp; <b>RH:</b> {incident.rh}</p>
+      <p><b>Conditions:</b> {incident.conditions}</p>
       <p><b>Situation:</b> {incident.situation}</p>
       <p><b>Safety Message:</b> {incident.safetyMessage}</p>
       <b>Objectives:</b>
@@ -1149,7 +1238,7 @@ function AppInner({ onLock }) {
   }, []);
 
   function applyBlob(blob, markSynced = true) {
-    setIncident(blob.incident || blankIncident());
+    setIncident(normalizeIncident(blob.incident));
     setResources(blob.resources || []);
     setOrg(blob.org || { positions: {}, divisions: [] });
     setComms(blob.comms || []);
