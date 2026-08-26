@@ -371,7 +371,7 @@ function TabResources({ resources, setResources, now }) {
       <Panel title="Check In Resource" icon={Truck}>
         <ResourceForm onAdd={addResource} />
       </Panel>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(190px, 1fr))`, gap: 10, overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
           const items = resources.filter(r => r.status === status);
           const isOver = drag && drag.overStatus === status && drag.id && resources.find(r => r.id === drag.id)?.status !== status;
@@ -1374,7 +1374,7 @@ function AppInner({ onLock }) {
         </div>
 
         {/* MAIN */}
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "20px 16px 60px" }}>
+        <div style={{ maxWidth: 1600, margin: "0 auto", padding: "20px 16px 60px" }}>
           {!ready ? (
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
