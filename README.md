@@ -14,6 +14,35 @@ There is **no login and no access control**: anyone with the URL can view
 and edit the board. That's intentional for a crew sharing one link on
 scene, but know that going in.
 
+## Offline support
+
+Command Board works with no internet connection, and syncs automatically
+once it's restored:
+
+- **The app itself** (the page, its code, icons) is cached by a service
+  worker, so it loads even with zero connectivity — as long as this
+  device has opened it at least once while online before.
+- **Incident data** is cached locally (IndexedDB) by Firestore's built-in
+  offline persistence. You can view and edit an incident with no
+  connection; your changes queue up locally and sync to the shared board
+  the moment the device reconnects — automatically, no action needed.
+- A small amber indicator appears in the header ("offline — changes will
+  sync when reconnected") whenever the device has no connection, so it's
+  clear you're working from cached data rather than the live board.
+
+**Real limits worth knowing, not glossed over:**
+- A device needs **one successful online visit** before it can do any of
+  this — there's no way to cache data or the app itself before it's ever
+  been fetched. First time on a new phone, you need signal at least once.
+- While offline, you only see incidents this specific device already
+  cached from before — a brand-new incident someone else started on
+  another device won't appear until you're back online.
+- If two people edit the *same* incident while both are offline (or edit
+  faster than sync can catch up), the more recent save wins and the
+  other's changes to that save are overwritten — same last-write-wins
+  behavior as the online mode, just now also possible across an offline
+  gap instead of only within a few seconds.
+
 ## PIN protection
 
 The app is gated behind a PIN. The first person to open the freshly
