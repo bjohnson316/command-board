@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
-  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical
+  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
+  Archive, RotateCcw
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
@@ -143,7 +144,7 @@ function Select({ children, ...props }) {
   return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }}>{children}</select>;
 }
 
-function Btn({ children, onClick, kind = "ghost", icon: Icon, style, type = "button", disabled }) {
+function Btn({ children, onClick, kind = "ghost", icon: Icon, style, type = "button", disabled, title }) {
   const base = {
     display: "inline-flex", alignItems: "center", gap: 7,
     padding: "8px 13px", borderRadius: 4, fontSize: 13, fontWeight: 600,
@@ -158,7 +159,7 @@ function Btn({ children, onClick, kind = "ghost", icon: Icon, style, type = "but
     danger: { background: "transparent", color: "#E4796B", border: `1px solid #5A2B24` },
   };
   return (
-    <button type={type} disabled={disabled} onClick={onClick} style={{ ...base, ...kinds[kind], ...style }}>
+    <button type={type} disabled={disabled} onClick={onClick} title={title} style={{ ...base, ...kinds[kind], ...style }}>
       {Icon && <Icon size={14} />}{children}
     </button>
   );
@@ -1100,7 +1101,66 @@ function ChangePinModal({ onClose }) {
   );
 }
 
-function LibraryModal({ index, onClose, onLoad, onNew, onDelete, mandatory }) {
+// Mirrors ChangePinModal above, but targets the archive's separate
+// password (archivePinHash) rather than the board's main PIN — kept as
+// its own component since the two are genuinely different credentials.
+function ChangeArchivePasswordModal({ onClose }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState(""); // "" | "saving" | "done"
+
+  const submit = async () => {
+    setError("");
+    const cfg = await loadPinConfig();
+    const currentHash = await sha256(current);
+    if (!cfg || currentHash !== cfg.archivePinHash) { setError("Incorrect current archive password."); return; }
+    if (next.length < 4) { setError("New password must be at least 4 characters."); return; }
+    if (next !== confirm) { setError("New passwords don't match."); return; }
+    setStatus("saving");
+    const nextHash = await sha256(next);
+    await savePinConfig({ archivePinHash: nextHash });
+    localStorage.setItem(ARCHIVE_UNLOCK_KEY, nextHash);
+    setStatus("done");
+    setTimeout(onClose, 900);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change Archive Password</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        {status === "done" ? (
+          <div style={{ color: COLORS.teal, fontSize: 13, textAlign: "center", padding: "10px 0" }}>Archive password updated.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Field label="Current Archive Password">
+              <TextInput type="password" value={current} onChange={e => setCurrent(e.target.value)} />
+            </Field>
+            <Field label="New Archive Password">
+              <TextInput type="password" value={next} onChange={e => setNext(e.target.value)} />
+            </Field>
+            <Field label="Confirm New Password">
+              <TextInput type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && submit()} />
+            </Field>
+            {error && <div style={{ color: "#E4796B", fontSize: 12 }}>{error}</div>}
+            <Btn kind="solid" onClick={submit} disabled={status === "saving"} style={{ justifyContent: "center" }}>
+              {status === "saving" ? "Saving…" : "Save New Password"}
+            </Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOpenArchive, mandatory }) {
+  const active = index.filter(i => !i.archived);
+  const archivedCount = index.length - active.length;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 480, maxHeight: "80vh", overflow: "auto" }}>
@@ -1113,9 +1173,9 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, mandatory }) {
             {mandatory ? "Select an incident to open, or start a new one." : "Shared board — visible and editable by anyone who opens this app. Changes sync to other users within a few seconds."}
           </div>
           <Btn kind="solid" icon={Plus} onClick={onNew} style={{ marginBottom: 14, width: "100%", justifyContent: "center" }}>Start New Incident</Btn>
-          {index.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13 }}>No saved incidents yet.</div>}
+          {active.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13 }}>No active incidents.</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {index.map(item => (
+            {active.map(item => (
               <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 5, padding: "9px 12px" }}>
                 <div>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>{item.name || "Unnamed Incident"}</div>
@@ -1123,11 +1183,124 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, mandatory }) {
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <Btn kind="subtle" onClick={() => onLoad(item.id)} style={{ padding: "5px 9px", fontSize: 12 }}>Open</Btn>
+                  <Btn kind="ghost" onClick={() => onArchive(item.id)} title="Archive" style={{ padding: "5px 9px", fontSize: 12 }}><Archive size={13} /></Btn>
                   <Btn kind="danger" onClick={() => onDelete(item.id)} style={{ padding: "5px 9px", fontSize: 12 }}><Trash2 size={13} /></Btn>
                 </div>
               </div>
             ))}
           </div>
+          <div style={{ borderTop: `1px solid ${COLORS.line}`, marginTop: 16, paddingTop: 12 }}>
+            <Btn kind="ghost" icon={Archive} onClick={onOpenArchive} style={{ width: "100%", justifyContent: "center", fontSize: 12.5 }}>
+              View Archived Incidents{archivedCount > 0 ? ` (${archivedCount})` : ""}
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ARCHIVE_UNLOCK_KEY = "cb_archive_unlocked_hash";
+
+// Gated behind its own password (separate from the board's main PIN) —
+// browsing here shows every archived incident with a one-click PDF
+// export, or a restore button to bring it back into the active list.
+function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword }) {
+  const [phase, setPhase] = useState("loading"); // loading | setup | locked | browse
+  const [config, setConfig] = useState(null);
+  const [pin, setPin] = useState("");
+  const [pin2, setPin2] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const cfg = await loadPinConfig();
+      setConfig(cfg);
+      if (!cfg || !cfg.archivePinHash) { setPhase("setup"); return; }
+      const remembered = localStorage.getItem(ARCHIVE_UNLOCK_KEY);
+      setPhase(remembered === cfg.archivePinHash ? "browse" : "locked");
+    })();
+  }, []);
+
+  const doSetup = async () => {
+    setError("");
+    if (pin.length < 4) return setError("Password must be at least 4 characters.");
+    if (pin !== pin2) return setError("Passwords don't match.");
+    const archivePinHash = await sha256(pin);
+    await savePinConfig({ archivePinHash });
+    localStorage.setItem(ARCHIVE_UNLOCK_KEY, archivePinHash);
+    setPhase("browse");
+  };
+  const doUnlock = async () => {
+    setError("");
+    const hash = await sha256(pin);
+    if (config && hash === config.archivePinHash) {
+      localStorage.setItem(ARCHIVE_UNLOCK_KEY, hash);
+      setPhase("browse");
+    } else {
+      setError("Incorrect password.");
+      setPin("");
+    }
+  };
+
+  const archived = index.filter(i => i.archived);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 420, maxHeight: "80vh", overflow: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${COLORS.line}` }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em" }}>Archived Incidents</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 16 }}>
+          {phase === "loading" && <div style={{ color: COLORS.muted, fontSize: 13 }}>Loading…</div>}
+
+          {(phase === "setup" || phase === "locked") && (
+            <>
+              <p style={{ fontSize: 12.5, color: COLORS.muted, lineHeight: 1.5, marginTop: 0 }}>
+                {phase === "setup"
+                  ? "No archive password is set yet. Choose one now — this is separate from the board's main PIN, and is only needed to view or export incidents that have been closed out."
+                  : "Enter the archive password to view closed-out incidents."}
+              </p>
+              <TextInput type="password" autoFocus placeholder={phase === "setup" ? "New archive password" : "Archive password"} value={pin}
+                onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
+                onKeyDown={e => e.key === "Enter" && phase === "locked" && doUnlock()} />
+              {phase === "setup" && (
+                <TextInput type="password" placeholder="Confirm password" value={pin2} onChange={e => setPin2(e.target.value)}
+                  style={{ width: "100%", marginTop: 10 }}
+                  onKeyDown={e => e.key === "Enter" && doSetup()} />
+              )}
+              <Btn kind="solid" onClick={phase === "setup" ? doSetup : doUnlock} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
+                {phase === "setup" ? "Set Password & Continue" : "Unlock"}
+              </Btn>
+              {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
+            </>
+          )}
+
+          {phase === "browse" && (
+            <>
+              {archived.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13 }}>No archived incidents.</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {archived.map(item => (
+                  <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 5, padding: "9px 12px" }}>
+                    <div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{item.name || "Unnamed Incident"}</div>
+                      <div style={{ fontSize: 11, color: COLORS.muted }}>{item.type} · archived {fmtDate(item.archivedAt)}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn kind="subtle" onClick={() => onExport(item.id)} style={{ padding: "5px 9px", fontSize: 12 }}>Export PDF</Btn>
+                      <Btn kind="ghost" onClick={() => onRestore(item.id)} title="Restore to active" style={{ padding: "5px 9px", fontSize: 12 }}><RotateCcw size={13} /></Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ borderTop: `1px solid ${COLORS.line}`, marginTop: 14, paddingTop: 12 }}>
+                <Btn kind="ghost" onClick={onChangePassword} style={{ width: "100%", justifyContent: "center", fontSize: 12 }}>
+                  Change Archive Password
+                </Btn>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -1206,6 +1379,8 @@ function AppInner({ onLock }) {
   const [tab, setTab] = useState("201");
   const [showLib, setShowLib] = useState(false);
   const [showChangePin, setShowChangePin] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+  const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
   const [incidentLoaded, setIncidentLoaded] = useState(false);
   const [index, setIndex] = useState([]);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
@@ -1300,6 +1475,27 @@ function AppInner({ onLock }) {
     setIndex(nextIndex);
     await saveIndex(nextIndex);
     await deleteIncidentBlob(id);
+  };
+
+  const archiveIncident = async (id) => {
+    const nextIndex = index.map(i => i.id === id ? { ...i, archived: true, archivedAt: nowISO() } : i);
+    setIndex(nextIndex);
+    await saveIndex(nextIndex);
+    // If the incident being archived is the one currently open, kick
+    // back to the library so nobody keeps editing a closed-out incident.
+    if (id === incident.id) {
+      setIncidentLoaded(false);
+      setShowLib(false);
+    }
+  };
+  const restoreIncident = async (id) => {
+    const nextIndex = index.map(i => i.id === id ? { ...i, archived: false } : i);
+    setIndex(nextIndex);
+    await saveIndex(nextIndex);
+  };
+  const exportArchivedIncident = async (id) => {
+    const blob = await loadIncidentBlob(id);
+    if (blob) await downloadPacketPdf(blob);
   };
 
   const typeInfo = INCIDENT_TYPES.find(t => t.v === incident.type) || INCIDENT_TYPES[0];
@@ -1401,10 +1597,23 @@ function AppInner({ onLock }) {
       {incidentLoaded && <PrintView incident={incident} resources={resources} comms={comms} org={org} safety={safety} logs={logs} />}
 
       {ready && (showLib || !incidentLoaded) && (
-        <LibraryModal index={index} onClose={() => setShowLib(false)} onLoad={openIncident} onNew={startNew} onDelete={deleteIncident} mandatory={!incidentLoaded} />
+        <LibraryModal index={index} onClose={() => setShowLib(false)} onLoad={openIncident} onNew={startNew} onDelete={deleteIncident}
+          onArchive={archiveIncident} onOpenArchive={() => setShowArchive(true)} mandatory={!incidentLoaded} />
       )}
 
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
+
+      {showArchive && (
+        <ArchiveModal
+          index={index}
+          onClose={() => setShowArchive(false)}
+          onExport={exportArchivedIncident}
+          onRestore={restoreIncident}
+          onChangePassword={() => setShowChangeArchivePassword(true)}
+        />
+      )}
+
+      {showChangeArchivePassword && <ChangeArchivePasswordModal onClose={() => setShowChangeArchivePassword(false)} />}
     </div>
   );
 }
