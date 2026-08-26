@@ -3,11 +3,12 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers
+  Archive, RotateCcw, Layers, Star
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
   deleteIncidentBlob, watchIncident, loadPinConfig, savePinConfig,
+  loadPresets, savePresets,
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
 import PinGate from "./PinGate.jsx";
@@ -302,7 +303,7 @@ function Panel({ title, icon: Icon, right, children, style }) {
 /* ============================================================
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
-function Tab201({ incident, setIncident, resources }) {
+function Tab201({ incident, setIncident, resources, objectivePresets, onSavePreset }) {
   const updateObjective = (i, val) => {
     const next = [...incident.objectives]; next[i] = val;
     setIncident({ ...incident, objectives: next });
@@ -329,8 +330,8 @@ function Tab201({ incident, setIncident, resources }) {
           <Field label="2. Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} placeholder="Dispatch / CAD #" /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
-          <Field label="3. Date Initiated"><TextInput value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} placeholder="MM/DD/YYYY" /></Field>
-          <Field label="Time Initiated"><TextInput value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} placeholder="24-hr clock" /></Field>
+          <Field label="3. Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
+          <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
@@ -360,13 +361,22 @@ function Tab201({ incident, setIncident, resources }) {
         <div style={{ marginTop: 16 }}>
           <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>7. Current and Planned Objectives</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {incident.objectives.map((o, i) => (
-              <div key={i} style={{ display: "flex", gap: 8 }}>
-                <span style={{ width: 22, textAlign: "right", color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, paddingTop: 9 }}>{i + 1}.</span>
-                <TextInput value={o} onChange={e => updateObjective(i, e.target.value)} style={{ flex: 1 }} placeholder="Objective..." />
-                <Btn kind="danger" onClick={() => removeObjective(i)}><Trash2 size={14} /></Btn>
-              </div>
-            ))}
+            {incident.objectives.map((o, i) => {
+              const isNewObjective = o.trim() && !objectivePresets.includes(o.trim());
+              return (
+                <div key={i} style={{ display: "flex", gap: 8 }}>
+                  <span style={{ width: 22, textAlign: "right", color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, paddingTop: 9 }}>{i + 1}.</span>
+                  <TextInput list="objective-presets" value={o} onChange={e => updateObjective(i, e.target.value)} style={{ flex: 1 }} placeholder="Objective..." />
+                  {isNewObjective && (
+                    <button onClick={() => onSavePreset(o.trim())} title="Save as a quick-pick objective for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
+                      <Star size={14} />
+                    </button>
+                  )}
+                  <Btn kind="danger" onClick={() => removeObjective(i)}><Trash2 size={14} /></Btn>
+                </div>
+              );
+            })}
+            <datalist id="objective-presets">{objectivePresets.map(p => <option key={p} value={p} />)}</datalist>
             <Btn kind="subtle" icon={Plus} onClick={addObjective} style={{ alignSelf: "flex-start" }}>Add Objective</Btn>
           </div>
         </div>
@@ -375,7 +385,7 @@ function Tab201({ incident, setIncident, resources }) {
           <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>8. Current and Planned Actions, Strategies, and Tactics</div>
           {incident.actionsLog.map(a => (
             <div key={a.id} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-              <TextInput value={a.time} onChange={e => updateAction(a.id, { time: e.target.value })} placeholder="Time" style={{ width: 90 }} />
+              <TextInput type="time" value={a.time} onChange={e => updateAction(a.id, { time: e.target.value })} style={{ width: 130 }} />
               <TextInput value={a.actions} onChange={e => updateAction(a.id, { actions: e.target.value })} placeholder="Actions..." style={{ flex: 1 }} />
               <button onClick={() => removeAction(a.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button>
             </div>
@@ -392,7 +402,7 @@ function Tab201({ incident, setIncident, resources }) {
           <Field label="Name"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
           <Field label="Position / Title"><TextInput value={incident.prepPosition} onChange={e => setIncident({ ...incident, prepPosition: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={incident.prepSignature} onChange={e => setIncident({ ...incident, prepSignature: e.target.value })} placeholder="Type name to sign" /></Field>
-          <Field label="Date / Time"><TextInput value={incident.prepDateTime} onChange={e => setIncident({ ...incident, prepDateTime: e.target.value })} /></Field>
+          <Field label="Date / Time"><TextInput type="datetime-local" value={incident.prepDateTime} onChange={e => setIncident({ ...incident, prepDateTime: e.target.value })} /></Field>
         </div>
       </Panel>
 
@@ -407,8 +417,8 @@ function Tab201({ incident, setIncident, resources }) {
               <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                 <td style={cell}><TextInput value={r.resource} onChange={e => updateOrder(r.id, { resource: e.target.value })} style={{ width: 130 }} /></td>
                 <td style={cell}><TextInput value={r.identifier} onChange={e => updateOrder(r.id, { identifier: e.target.value })} style={{ width: 110 }} /></td>
-                <td style={cell}><TextInput value={r.ordered} onChange={e => updateOrder(r.id, { ordered: e.target.value })} style={{ width: 110 }} /></td>
-                <td style={cell}><TextInput value={r.eta} onChange={e => updateOrder(r.id, { eta: e.target.value })} style={{ width: 90 }} /></td>
+                <td style={cell}><TextInput type="datetime-local" value={r.ordered} onChange={e => updateOrder(r.id, { ordered: e.target.value })} style={{ width: 170 }} /></td>
+                <td style={cell}><TextInput type="time" value={r.eta} onChange={e => updateOrder(r.id, { eta: e.target.value })} style={{ width: 110 }} /></td>
                 <td style={cell}>
                   <input type="checkbox" checked={r.arrived} onChange={e => updateOrder(r.id, { arrived: e.target.checked })} style={{ width: 18, height: 18 }} />
                 </td>
@@ -438,16 +448,27 @@ function Tab201({ incident, setIncident, resources }) {
 /* ============================================================
    TAB: RESOURCE STATUS BOARD
    ============================================================ */
-function ResourceForm({ onAdd }) {
+function ResourceForm({ onAdd, unitPresets, onSavePreset }) {
   const [f, setF] = useState({ label: "", kind: RESOURCE_KINDS[0], personnel: 1, assignment: "" });
   const submit = () => {
     if (!f.label.trim()) return;
     onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, personnel: Number(f.personnel) || 1, assignment: f.assignment, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "" });
   };
+  const isNewUnit = f.label.trim() && !unitPresets.includes(f.label.trim());
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-      <Field label="Unit / Resource ID"><TextInput value={f.label} onChange={e => setF({ ...f, label: e.target.value })} placeholder="Engine 21, Crew 3, Med 1..." style={{ width: 180 }} onKeyDown={e => e.key === "Enter" && submit()} /></Field>
+      <Field label="Unit / Resource ID">
+        <div style={{ display: "flex", gap: 4 }}>
+          <TextInput list="unit-presets" value={f.label} onChange={e => setF({ ...f, label: e.target.value })} placeholder="Engine 21, Crew 3, Med 1..." style={{ width: 180 }} onKeyDown={e => e.key === "Enter" && submit()} />
+          {isNewUnit && (
+            <button onClick={() => onSavePreset(f.label.trim())} title="Save as a quick-pick unit for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
+              <Star size={14} />
+            </button>
+          )}
+        </div>
+        <datalist id="unit-presets">{unitPresets.map(u => <option key={u} value={u} />)}</datalist>
+      </Field>
       <Field label="Type">
         <Select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })} style={{ width: 150 }}>
           {RESOURCE_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
@@ -515,7 +536,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now }) {
+function TabResources({ resources, setResources, now, unitPresets, onSavePreset }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -557,7 +578,7 @@ function TabResources({ resources, setResources, now }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Check In Resource" icon={Truck}>
-        <ResourceForm onAdd={addResource} />
+        <ResourceForm onAdd={addResource} unitPresets={unitPresets} onSavePreset={onSavePreset} />
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
@@ -662,9 +683,9 @@ function TabComms({ comms, setComms, incident }) {
       <Panel title="ICS-205 · Incident Radio Communications Plan" icon={Radio}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
-          <Field label="Date / Time Prepared"><TextInput value={comms.dateTimePrepared} onChange={e => set({ dateTimePrepared: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
-          <Field label="Operational Period From"><TextInput value={comms.opFrom} onChange={e => set({ opFrom: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
-          <Field label="Operational Period To"><TextInput value={comms.opTo} onChange={e => set({ opTo: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+          <Field label="Date / Time Prepared"><TextInput type="datetime-local" value={comms.dateTimePrepared} onChange={e => set({ dateTimePrepared: e.target.value })} /></Field>
+          <Field label="Operational Period From"><TextInput type="datetime-local" value={comms.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
+          <Field label="Operational Period To"><TextInput type="datetime-local" value={comms.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
         </div>
       </Panel>
 
@@ -717,7 +738,7 @@ function TabComms({ comms, setComms, incident }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
           <Field label="Prepared By (Communications Unit Leader)"><TextInput value={comms.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={comms.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
-          <Field label="Date / Time"><TextInput value={comms.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
+          <Field label="Date / Time"><TextInput type="datetime-local" value={comms.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
         </div>
       </Panel>
     </div>
@@ -779,11 +800,11 @@ function Tab208({ ics208, setIcs208, incident }) {
     <Panel title="ICS-208 · Safety Message / Plan" icon={AlertTriangle}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
-        <Field label="Date / Time Prepared"><TextInput value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+        <Field label="Date / Time Prepared"><TextInput type="datetime-local" value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-        <Field label="Operational Period From"><TextInput value={ics208.opFrom} onChange={e => set({ opFrom: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
-        <Field label="Operational Period To"><TextInput value={ics208.opTo} onChange={e => set({ opTo: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+        <Field label="Operational Period From"><TextInput type="datetime-local" value={ics208.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
+        <Field label="Operational Period To"><TextInput type="datetime-local" value={ics208.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
       </div>
       <div style={{ marginTop: 14 }}>
         <Field label="3. Safety Message/Expanded Safety Message, Safety Plan, Site Safety Plan" wide>
@@ -804,7 +825,7 @@ function Tab208({ ics208, setIcs208, incident }) {
         <Field label="Name"><TextInput value={ics208.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
         <Field label="Position / Title"><TextInput value={ics208.position} onChange={e => set({ position: e.target.value })} placeholder="Safety Officer" /></Field>
         <Field label="Signature"><TextInput value={ics208.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
-        <Field label="Date / Time"><TextInput value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
+        <Field label="Date / Time"><TextInput type="datetime-local" value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
       </div>
     </Panel>
   );
@@ -835,10 +856,10 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       <Panel title="ICS-208 HM · Site Safety and Control Plan" icon={AlertTriangle}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
-          <Field label="Date Prepared"><TextInput value={ics208hm.dateTime} onChange={e => set({ dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+          <Field label="Date Prepared"><TextInput type="datetime-local" value={ics208hm.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label="Op. Period From"><TextInput value={ics208hm.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
-            <Field label="Op. Period To"><TextInput value={ics208hm.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
+            <Field label="Op. Period From"><TextInput type="datetime-local" value={ics208hm.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
+            <Field label="Op. Period To"><TextInput type="datetime-local" value={ics208hm.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
           </div>
         </div>
         <div style={{ marginTop: 12 }}>
@@ -996,7 +1017,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       <Panel title="Section XII · Safety Briefing" icon={CheckCircle2}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label="Asst. Safety Officer – HM Signature"><TextInput value={ics208hm.asstSafetyOfficerSignature} onChange={e => set({ asstSafetyOfficerSignature: e.target.value })} placeholder="Type name to sign" /></Field>
-          <Field label="Safety Briefing Completed (Time)"><TextInput value={ics208hm.safetyBriefingTime} onChange={e => set({ safetyBriefingTime: e.target.value })} /></Field>
+          <Field label="Safety Briefing Completed (Time)"><TextInput type="time" value={ics208hm.safetyBriefingTime} onChange={e => set({ safetyBriefingTime: e.target.value })} /></Field>
           <Field label="HM Group Supervisor Signature"><TextInput value={ics208hm.hmGroupSupervisorSignature} onChange={e => set({ hmGroupSupervisorSignature: e.target.value })} placeholder="Type name to sign" /></Field>
           <Field label="Incident Commander Signature"><TextInput value={ics208hm.incidentCommanderSignature} onChange={e => set({ incidentCommanderSignature: e.target.value })} placeholder="Type name to sign" /></Field>
         </div>
@@ -1061,8 +1082,8 @@ function Tab209({ ics209, setIcs209, incident }) {
           <Field label="Incident Management Organization"><TextInput value={ics209.imTeam} onChange={e => set({ imTeam: e.target.value })} placeholder="Type 1/2/3 IMT, Unified Command..." /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
-          <Field label="Incident Start Date"><TextInput value={ics209.startDate} onChange={e => set({ startDate: e.target.value })} /></Field>
-          <Field label="Start Time"><TextInput value={ics209.startTime} onChange={e => set({ startTime: e.target.value })} /></Field>
+          <Field label="Incident Start Date"><TextInput type="date" value={ics209.startDate} onChange={e => set({ startDate: e.target.value })} /></Field>
+          <Field label="Start Time"><TextInput type="time" value={ics209.startTime} onChange={e => set({ startTime: e.target.value })} /></Field>
           <Field label="Time Zone"><TextInput value={ics209.startTimeZone} onChange={e => set({ startTimeZone: e.target.value })} placeholder="EDT, PST..." /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
@@ -1072,8 +1093,8 @@ function Tab209({ ics209, setIcs209, incident }) {
           <Field label="Complexity Level"><TextInput value={ics209.complexityLevel} onChange={e => set({ complexityLevel: e.target.value })} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-          <Field label="For Time Period From"><TextInput value={ics209.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
-          <Field label="To"><TextInput value={ics209.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
+          <Field label="For Time Period From"><TextInput type="datetime-local" value={ics209.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
+          <Field label="To"><TextInput type="datetime-local" value={ics209.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
         </div>
       </Panel>
 
@@ -1081,8 +1102,8 @@ function Tab209({ ics209, setIcs209, incident }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Field label="Prepared By — Print Name"><TextInput value={ics209.preparedByName} onChange={e => set({ preparedByName: e.target.value })} /></Field>
           <Field label="ICS Position"><TextInput value={ics209.preparedByPosition} onChange={e => set({ preparedByPosition: e.target.value })} /></Field>
-          <Field label="Date/Time Prepared"><TextInput value={ics209.preparedDateTime} onChange={e => set({ preparedDateTime: e.target.value })} /></Field>
-          <Field label="Date/Time Submitted"><TextInput value={ics209.submittedDateTime} onChange={e => set({ submittedDateTime: e.target.value })} /></Field>
+          <Field label="Date/Time Prepared"><TextInput type="datetime-local" value={ics209.preparedDateTime} onChange={e => set({ preparedDateTime: e.target.value })} /></Field>
+          <Field label="Date/Time Submitted"><TextInput type="datetime-local" value={ics209.submittedDateTime} onChange={e => set({ submittedDateTime: e.target.value })} /></Field>
           <Field label="Time Zone"><TextInput value={ics209.submittedTimeZone} onChange={e => set({ submittedTimeZone: e.target.value })} /></Field>
           <Field label="Primary Location/Org/Agency Sent To"><TextInput value={ics209.sentTo} onChange={e => set({ sentTo: e.target.value })} /></Field>
           <Field label="Approved By — Print Name"><TextInput value={ics209.approvedByName} onChange={e => set({ approvedByName: e.target.value })} /></Field>
@@ -1204,8 +1225,8 @@ function Tab209({ ics209, setIcs209, incident }) {
         <Field label="Planned Actions for Next Operational Period" wide><TextArea value={ics209.plannedActions} onChange={e => set({ plannedActions: e.target.value })} style={{ minHeight: 60, marginTop: 12 }} /></Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
           <Field label="Projected Final Incident Size/Area"><TextInput value={ics209.projectedFinalSize} onChange={e => set({ projectedFinalSize: e.target.value })} /></Field>
-          <Field label="Anticipated Management Completion Date"><TextInput value={ics209.completionDate} onChange={e => set({ completionDate: e.target.value })} /></Field>
-          <Field label="Projected Demob Start Date"><TextInput value={ics209.demobStartDate} onChange={e => set({ demobStartDate: e.target.value })} /></Field>
+          <Field label="Anticipated Management Completion Date"><TextInput type="date" value={ics209.completionDate} onChange={e => set({ completionDate: e.target.value })} /></Field>
+          <Field label="Projected Demob Start Date"><TextInput type="date" value={ics209.demobStartDate} onChange={e => set({ demobStartDate: e.target.value })} /></Field>
           <Field label="Estimated Incident Costs to Date"><TextInput value={ics209.costsToDate} onChange={e => set({ costsToDate: e.target.value })} /></Field>
           <Field label="Projected Final Incident Cost Estimate"><TextInput value={ics209.finalCostEstimate} onChange={e => set({ finalCostEstimate: e.target.value })} /></Field>
         </div>
@@ -1253,8 +1274,8 @@ function Tab206({ ics206, setIcs206, incident }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Operational Period From"><TextInput value={ics206.opFrom} onChange={e => setIcs206({ ...ics206, opFrom: e.target.value })} /></Field>
-            <Field label="Operational Period To"><TextInput value={ics206.opTo} onChange={e => setIcs206({ ...ics206, opTo: e.target.value })} /></Field>
+            <Field label="Operational Period From"><TextInput type="datetime-local" value={ics206.opFrom} onChange={e => setIcs206({ ...ics206, opFrom: e.target.value })} /></Field>
+            <Field label="Operational Period To"><TextInput type="datetime-local" value={ics206.opTo} onChange={e => setIcs206({ ...ics206, opTo: e.target.value })} /></Field>
           </div>
         </div>
       </Panel>
@@ -1364,7 +1385,7 @@ function Tab206({ ics206, setIcs206, incident }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 16 }}>
           <Field label="7. Prepared By (Medical Unit Leader)"><TextInput value={ics206.preparedBy} onChange={e => setIcs206({ ...ics206, preparedBy: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={ics206.preparedSignature} onChange={e => setIcs206({ ...ics206, preparedSignature: e.target.value })} placeholder="Type name to sign" /></Field>
-          <Field label="Date / Time"><TextInput value={ics206.dateTime} onChange={e => setIcs206({ ...ics206, dateTime: e.target.value })} /></Field>
+          <Field label="Date / Time"><TextInput type="datetime-local" value={ics206.dateTime} onChange={e => setIcs206({ ...ics206, dateTime: e.target.value })} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
           <Field label="8. Approved By (Safety Officer)"><TextInput value={ics206.approvedBy} onChange={e => setIcs206({ ...ics206, approvedBy: e.target.value })} /></Field>
@@ -1500,8 +1521,8 @@ function Tab215A({ safety, setSafety, org, incident }) {
 
       <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Operational Period</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
-        <Field label="Date / Time From"><TextInput value={safety.opFrom} onChange={e => setSafety({ ...safety, opFrom: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
-        <Field label="Date / Time To"><TextInput value={safety.opTo} onChange={e => setSafety({ ...safety, opTo: e.target.value })} placeholder="MM/DD/YYYY HH:MM" /></Field>
+        <Field label="Date / Time From"><TextInput type="datetime-local" value={safety.opFrom} onChange={e => setSafety({ ...safety, opFrom: e.target.value })} /></Field>
+        <Field label="Date / Time To"><TextInput type="datetime-local" value={safety.opTo} onChange={e => setSafety({ ...safety, opTo: e.target.value })} /></Field>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -1539,7 +1560,7 @@ function Tab215A({ safety, setSafety, org, incident }) {
         <Field label="Name"><TextInput value={safety.preparedBy} onChange={e => setSafety({ ...safety, preparedBy: e.target.value })} placeholder={org.positions["Safety Officer"] || "Name"} /></Field>
         <Field label="Position / Title"><TextInput value={safety.position} onChange={e => setSafety({ ...safety, position: e.target.value })} placeholder="Safety Officer" /></Field>
         <Field label="Signature"><TextInput value={safety.signature} onChange={e => setSafety({ ...safety, signature: e.target.value })} placeholder="Type name to sign" /></Field>
-        <Field label="Date / Time"><TextInput value={safety.dateTime} onChange={e => setSafety({ ...safety, dateTime: e.target.value })} placeholder={new Date().toLocaleString()} /></Field>
+        <Field label="Date / Time"><TextInput type="datetime-local" value={safety.dateTime} onChange={e => setSafety({ ...safety, dateTime: e.target.value })} /></Field>
       </div>
     </Panel>
   );
@@ -1787,7 +1808,7 @@ function buildSimplePdf(lines, logo, meta) {
   // header text overlap the first line of content when no logo loaded.
   const drawH = logo ? 54 : 0;
   const drawW = logo ? drawH * (logo.width / logo.height) : 0;
-  const textBottomOffset = 56; // below the incident-name line (headerTop-46) with clearance
+  const textBottomOffset = 70; // below the "Started:" line (headerTop-60) with clearance
   const logoBottomOffset = logo ? drawH + 8 : 0;
   const ruleOffset = Math.max(textBottomOffset, logoBottomOffset);
   const HEADER_H = ruleOffset + 14;
@@ -1857,8 +1878,11 @@ function buildSimplePdf(lines, logo, meta) {
       stream += "BT\n";
       const textX = MARGIN_X + drawW + (logo ? 14 : 0);
       stream += `/FHB 18 Tf\n1 0 0 1 ${textX} ${(headerTop - 16).toFixed(1)} Tm\n(COMMAND BOARD) Tj\n`;
-      stream += `/FH 9 Tf\n1 0 0 1 ${textX} ${(headerTop - 30).toFixed(1)} Tm\n(ICS Incident Packet) Tj\n`;
+      stream += `/FH 9 Tf\n1 0 0 1 ${textX} ${(headerTop - 30).toFixed(1)} Tm\n(Incident Action Plan Packet) Tj\n`;
       stream += `/FHB 12 Tf\n1 0 0 1 ${textX} ${(headerTop - 46).toFixed(1)} Tm\n(${pdfEscape(meta.name || "Untitled Incident")}) Tj\n`;
+      if (meta.started) {
+        stream += `/FH 9 Tf\n1 0 0 1 ${textX} ${(headerTop - 60).toFixed(1)} Tm\n(Started: ${pdfEscape(meta.started)}) Tj\n`;
+      }
       stream += "ET\n";
       stream += `${RED} RG 1.4 w ${MARGIN_X} ${(headerTop - ruleOffset).toFixed(1)} m ${PAGE_W - MARGIN_X} ${(headerTop - ruleOffset).toFixed(1)} l S\n`;
     }
@@ -1939,7 +1963,9 @@ function loadLogoRGB(dataUri, maxDim = 130) {
 
 async function downloadPacketPdf(data) {
   const logo = await loadLogoRGB(KFD_PATCH_DATA_URI);
-  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: data.incident.name });
+  const inc = data.incident || {};
+  const started = [inc.dateInitiated, inc.timeInitiated].filter(Boolean).join(" ") || (inc.opStart ? new Date(inc.opStart).toLocaleString() : "");
+  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: inc.name, started });
   const blob = new Blob(parts, { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2291,6 +2317,17 @@ function GlobalStyles() {
       html, body, #root { margin: 0; padding: 0; min-height: 100%; background: ${COLORS.bg}; }
       select { -webkit-appearance: none; }
       input:focus, textarea:focus, select:focus { border-color: ${COLORS.amber} !important; }
+      /* Native date/time picker icons default to a dark glyph that's
+         hard to see on our dark inputs — invert so it reads clearly. */
+      input[type="date"]::-webkit-calendar-picker-indicator,
+      input[type="time"]::-webkit-calendar-picker-indicator,
+      input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+        filter: invert(1);
+        cursor: pointer;
+      }
+      input[type="date"], input[type="time"], input[type="datetime-local"] {
+        color-scheme: dark;
+      }
       ::-webkit-scrollbar { height: 8px; width: 8px; }
       ::-webkit-scrollbar-thumb { background: ${COLORS.line}; border-radius: 4px; }
       .print-only { display: none; }
@@ -2340,6 +2377,7 @@ function AppInner({ onLock }) {
   const [showChangePin, setShowChangePin] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
+  const [presets, setPresets] = useState({ units: [], objectives: [] });
   const [incidentLoaded, setIncidentLoaded] = useState(false);
   const [index, setIndex] = useState([]);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
@@ -2370,10 +2408,25 @@ function AppInner({ onLock }) {
     (async () => {
       const idx = await loadIndex();
       setIndex(idx);
+      const p = await loadPresets();
+      setPresets({ units: p.units || [], objectives: p.objectives || [] });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
   }, []);
+
+  const saveUnitPreset = async (unit) => {
+    if (!unit || presets.units.includes(unit)) return;
+    const next = { ...presets, units: [...presets.units, unit] };
+    setPresets(next);
+    await savePresets(next);
+  };
+  const saveObjectivePreset = async (objective) => {
+    if (!objective || presets.objectives.includes(objective)) return;
+    const next = { ...presets, objectives: [...presets.objectives, objective] };
+    setPresets(next);
+    await savePresets(next);
+  };
 
   function applyBlob(blob, markSynced = true) {
     setIncident(normalizeIncident(blob.incident));
@@ -2487,7 +2540,7 @@ function AppInner({ onLock }) {
               <img src={KFD_PATCH_DATA_URI} alt="KFD Patch" style={{ width: 34, height: 44, objectFit: "contain", flexShrink: 0 }} />
               <div>
                 <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 19, letterSpacing: "0.03em", lineHeight: 1 }}>COMMAND BOARD</div>
-                <div style={{ fontSize: 10.5, color: COLORS.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>ICS Field Incident Management</div>
+                <div style={{ fontSize: 10.5, color: COLORS.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Incident Management System</div>
               </div>
             </div>
 
@@ -2548,8 +2601,8 @@ function AppInner({ onLock }) {
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
             <>
-              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} />}
-              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} />}
+              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
+              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} unitPresets={presets.units} onSavePreset={saveUnitPreset} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (

@@ -63,6 +63,23 @@ export async function savePinConfig(cfg) {
   await setDoc(doc(db, "icMeta", "config"), cfg, { merge: true });
 }
 
+// Canned Units / Objectives — board-wide quick-pick lists so common
+// apparatus IDs and standard objectives don't need retyping on every
+// incident. Shared across all incidents (not per-incident), since
+// "Engine 21" is the same unit regardless of which incident it's on.
+export async function loadPresets() {
+  try {
+    const snap = await getDoc(doc(db, "icMeta", "presets"));
+    return snap.exists() ? snap.data() : { units: [], objectives: [] };
+  } catch {
+    return { units: [], objectives: [] };
+  }
+}
+
+export async function savePresets(presets) {
+  await setDoc(doc(db, "icMeta", "presets"), presets, { merge: true });
+}
+
 // Real-time listener for the currently open incident. Calls onChange
 // with the latest blob whenever it changes in Firestore, including
 // changes made by other users. Returns an unsubscribe function.
