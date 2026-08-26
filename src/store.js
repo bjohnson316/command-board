@@ -46,9 +46,10 @@ export async function deleteIncidentBlob(id) {
   await deleteDoc(doc(db, "icIncidents", id));
 }
 
-// PIN config — { pinHash } stored at icMeta/config. Client-side gate
-// only (see PinGate.jsx); Firestore rules stay open, so this deters a
-// casually-shared link but is not a security boundary on its own.
+// PIN config — { pinHash, archivePinHash } stored at icMeta/config.
+// Client-side gate only (see PinGate.jsx); Firestore rules stay open,
+// so this deters a casually-shared link but is not a security boundary
+// on its own. merge:true so setting one field never wipes the other.
 export async function loadPinConfig() {
   try {
     const snap = await getDoc(doc(db, "icMeta", "config"));
@@ -59,7 +60,7 @@ export async function loadPinConfig() {
 }
 
 export async function savePinConfig(cfg) {
-  await setDoc(doc(db, "icMeta", "config"), cfg);
+  await setDoc(doc(db, "icMeta", "config"), cfg, { merge: true });
 }
 
 // Real-time listener for the currently open incident. Calls onChange

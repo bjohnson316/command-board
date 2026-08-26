@@ -1063,7 +1063,7 @@ function ChangePinModal({ onClose }) {
     if (next !== confirm) { setError("New PINs don't match."); return; }
     setStatus("saving");
     const nextHash = await sha256(next);
-    await savePinConfig({ pinHash: nextHash });
+    await savePinConfig({ ...cfg, pinHash: nextHash });
     localStorage.setItem("cb_unlocked_hash", nextHash);
     setStatus("done");
     setTimeout(onClose, 900);
@@ -1120,7 +1120,7 @@ function ChangeArchivePasswordModal({ onClose }) {
     if (next !== confirm) { setError("New passwords don't match."); return; }
     setStatus("saving");
     const nextHash = await sha256(next);
-    await savePinConfig({ archivePinHash: nextHash });
+    await savePinConfig({ ...cfg, archivePinHash: nextHash });
     localStorage.setItem(ARCHIVE_UNLOCK_KEY, nextHash);
     setStatus("done");
     setTimeout(onClose, 900);
@@ -1227,7 +1227,7 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
     if (pin.length < 4) return setError("Password must be at least 4 characters.");
     if (pin !== pin2) return setError("Passwords don't match.");
     const archivePinHash = await sha256(pin);
-    await savePinConfig({ archivePinHash });
+    await savePinConfig({ ...config, archivePinHash });
     localStorage.setItem(ARCHIVE_UNLOCK_KEY, archivePinHash);
     setPhase("browse");
   };
