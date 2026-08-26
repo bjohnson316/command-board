@@ -1346,14 +1346,14 @@ function AppInner({ onLock }) {
                   offline — changes will sync when reconnected
                 </span>
               )}
-              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
-                synced to shared board
-              </span>
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, logs })}>Print / Export</Btn>
               <Btn kind="ghost" onClick={() => setShowChangePin(true)} style={{ padding: "6px 9px", fontSize: 12 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 9px", fontSize: 12 }}>Lock</Btn>
+              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
+                synced to shared board
+              </span>
             </div>
           </div>
 
