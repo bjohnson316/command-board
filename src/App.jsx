@@ -621,10 +621,6 @@ function pdfEscape(str) {
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
 }
-// Helvetica has no fixed char width, so alignment can't rely on padding
-// spaces like a monospace font. This estimates an average advance width
-// per character (in points, at size 1) to size columns and truncate text
-// that would overflow a cell — good enough without real glyph metrics.
 const AVG_CHAR_W = { H: 0.5, HB: 0.54 };
 function fitText(str, font, size, maxWidth) {
   let s = String(str ?? "").replace(/\s+/g, " ").trim();
@@ -646,23 +642,19 @@ function wrapPush(L, text, width = 100) {
   }
   if (line) L.push({ kind: "text", text: line, font: "H", size: 9 });
 }
-// colWidths are in points (not characters) — each cell is placed at an
-// explicit x offset so columns stay aligned regardless of font.
 function tableLines(headers, colWidths, rows, title) {
   const lines = [];
-  if (title) lines.push({ kind: "text", text: title, font: "HB", size: 10 });
+  if (title) lines.push({ kind: "heading", text: title });
   const xOffsets = [];
   let acc = 0;
   colWidths.forEach(w => { xOffsets.push(acc); acc += w; });
   const totalWidth = acc;
-
   const toRow = (cells, font, size) => ({
     kind: "row", font, size,
     cells: cells.map((c, i) => ({ text: fitText(c, font, size, colWidths[i] - 6), x: xOffsets[i] })),
   });
-
   lines.push(toRow(headers, "HB", 9));
-  lines.push({ kind: "rule", width: totalWidth });
+  lines.push({ kind: "rule", width: totalWidth, color: "light" });
   if (rows.length === 0) {
     lines.push({ kind: "text", text: "(none entered)", font: "H", size: 9 });
   } else {
@@ -672,21 +664,24 @@ function tableLines(headers, colWidths, rows, title) {
   return lines;
 }
 
+// A "heading" line renders bold + a full-width light rule beneath it,
+// giving the report real section breaks instead of plain bold text.
+function heading(L, text) {
+  L.push({ kind: "heading", text });
+}
+
 function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   const L = [];
   const push = (text, font = "H", size = 9) => L.push({ kind: "text", text, font, size });
   const blank = () => push("");
 
-  push(`${incident.name || "UNTITLED INCIDENT"} - ICS INCIDENT PACKET`, "HB", 15);
-  push(`Generated ${new Date().toLocaleString()}`, "H", 8);
+  push(`Incident #: ${incident.number || "-"}   Type: ${incident.type || "-"}`, "H", 10);
+  push(`Location: ${incident.location || "-"}`, "H", 10);
+  push(`IC: ${incident.icName || "-"}   Prepared By: ${incident.preparedBy || "-"}`, "H", 10);
+  push(`Weather: ${incident.weather || "-"}`, "H", 10);
   blank();
 
-  push("ICS-201 - INCIDENT BRIEFING", "HB", 12);
-  push(`Incident #: ${incident.number || "-"}   Type: ${incident.type || "-"}`);
-  push(`Location: ${incident.location || "-"}`);
-  push(`IC: ${incident.icName || "-"}   Prepared By: ${incident.preparedBy || "-"}`);
-  push(`Weather: ${incident.weather || "-"}`);
-  blank();
+  heading(L, "ICS-201 · Incident Briefing");
   push("Situation:", "HB", 9);
   wrapPush(L, incident.situation);
   blank();
@@ -700,9 +695,9 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   blank();
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
-    resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "RESOURCE SUMMARY"));
+    resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Summary"));
 
-  push("COMMAND STRUCTURE", "HB", 12);
+  heading(L, "Command Structure");
   const orgLines = [
     ...Object.entries(org.positions).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`),
     ...org.divisions.filter(d => d.name).map(d => `${d.name} - Supv: ${d.supervisor || "-"}`),
@@ -712,10 +707,10 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   blank();
 
   L.push(...tableLines(["CHANNEL", "FUNCTION", "ASSIGN", "TX", "RX", "MODE"], [65, 85, 85, 55, 55, 60],
-    comms.map(c => [c.channel, c.func, c.assignment, c.tx, c.rx, c.mode]), "ICS-205 COMMUNICATIONS PLAN"));
+    comms.map(c => [c.channel, c.func, c.assignment, c.tx, c.rx, c.mode]), "ICS-205 · Communications Plan"));
 
-  push("ICS-215A - INCIDENT ACTION PLAN SAFETY ANALYSIS", "HB", 12);
-  push(`Operational Period: ${safety.opFrom || "-"} to ${safety.opTo || "-"}`);
+  heading(L, "ICS-215A · Incident Action Plan Safety Analysis");
+  push(`Operational Period: ${safety.opFrom || "-"} to ${safety.opTo || "-"}`, "H", 9);
   blank();
   L.push(...tableLines(["BRANCH", "DIV/GRP", "HAZARDS", "MITIGATIONS"], [60, 70, 175, 175],
     safety.rows.map(r => [r.branch, r.division, r.hazards, r.mitigations])));
@@ -723,7 +718,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   push(`Signature: ${safety.signature || "-"}   Date/Time: ${safety.dateTime || "-"}`);
   blank();
 
-  push("ICS-214 - ACTIVITY LOGS", "HB", 12);
+  heading(L, "ICS-214 · Activity Logs");
   if (logs.length === 0) {
     push("(none entered)");
   } else {
@@ -736,24 +731,36 @@ function buildPacketLines({ incident, resources, comms, org, safety, logs }) {
   return L;
 }
 
-// Minimal hand-built single/multi-page PDF using base-14 Helvetica fonts
-// (guaranteed present in every PDF viewer, visually near-identical to
-// Arial — true Arial would need embedding actual font binary data,
-// which isn't available in this environment).
-function buildSimplePdf(lines) {
-  const PAGE_W = 612, PAGE_H = 792, MARGIN_X = 40, MARGIN_TOP = 750, MARGIN_BOTTOM = 40;
-  const LH = { H: 12, HB: 14 };
+// Byte-accurate PDF assembly. Content is built as an array of "parts"
+// (ASCII strings + binary Uint8Arrays for the embedded image) rather
+// than one big string, because a JS string containing raw bytes >127
+// gets mangled by UTF-8 re-encoding when passed to Blob — binary data
+// has to travel as an actual typed array, not characters in a string.
+function buildSimplePdf(lines, logo, meta) {
+  const PAGE_W = 612, PAGE_H = 792, MARGIN_X = 40, MARGIN_BOTTOM = 46;
+  const HEADER_H = logo ? 86 : 46;
+  const MARGIN_TOP = PAGE_H - 42;
+  const LH = { H: 12, HB: 14, heading: 20 };
+  const RED = "0.769 0.204 0.122";
+  const GREY = "0.72 0.72 0.72";
 
   const pages = [];
   let cur = [];
-  let y = MARGIN_TOP;
+  let y = MARGIN_TOP - HEADER_H;
   for (const ln of lines) {
-    const lh = LH[ln.font] || 12;
+    const lh = LH[ln.kind === "heading" ? "heading" : ln.font] || 12;
     if (y - lh < MARGIN_BOTTOM) { pages.push(cur); cur = []; y = MARGIN_TOP; }
     cur.push({ ...ln, y });
     y -= lh;
   }
   pages.push(cur);
+  const totalPages = pages.length;
+
+  const parts = [];
+  let pos = 0;
+  const push = (x) => { parts.push(x); pos += (typeof x === "string") ? x.length : x.byteLength; };
+
+  push("%PDF-1.4\n");
 
   let nextId = 1;
   const reserve = () => nextId++;
@@ -762,58 +769,128 @@ function buildSimplePdf(lines) {
   const fontHId = reserve();
   const fontHBId = reserve();
   const resourcesId = reserve();
+  const imageId = logo ? reserve() : null;
   const pageIds = pages.map(() => reserve());
   const contentIds = pages.map(() => reserve());
 
-  const objects = {};
-  objects[fontHId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-  objects[fontHBId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
-  objects[resourcesId] = `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> >>`;
+  const offsets = {};
+  const writeObj = (id, body) => {
+    offsets[id] = pos;
+    push(`${id} 0 obj\n`);
+    body();
+    push(`\nendobj\n`);
+  };
+
+  writeObj(fontHId, () => push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"));
+  writeObj(fontHBId, () => push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"));
+  if (logo) {
+    writeObj(imageId, () => {
+      push(`<< /Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${logo.rgb.byteLength} >>\nstream\n`);
+      push(logo.rgb);
+      push(`\nendstream`);
+    });
+  }
+  const resourcesDict = logo
+    ? `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> /XObject << /Logo ${imageId} 0 R >> >>`
+    : `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> >>`;
+  writeObj(resourcesId, () => push(resourcesDict));
 
   pages.forEach((pageLines, i) => {
-    let text = "BT\n";
-    let paths = "";
+    let stream = "";
+    if (i === 0) {
+      const drawH = logo ? 54 : 0;
+      const drawW = logo ? drawH * (logo.width / logo.height) : 0;
+      const headerTop = PAGE_H - 40;
+      if (logo) {
+        stream += `q ${drawW.toFixed(1)} 0 0 ${drawH.toFixed(1)} ${MARGIN_X} ${(headerTop - drawH).toFixed(1)} cm /Logo Do Q\n`;
+      }
+      stream += "BT\n";
+      const textX = MARGIN_X + drawW + (logo ? 14 : 0);
+      stream += `/FHB 18 Tf\n1 0 0 1 ${textX} ${(headerTop - 16).toFixed(1)} Tm\n(COMMAND BOARD) Tj\n`;
+      stream += `/FH 9 Tf\n1 0 0 1 ${textX} ${(headerTop - 30).toFixed(1)} Tm\n(ICS Incident Packet) Tj\n`;
+      stream += `/FHB 12 Tf\n1 0 0 1 ${textX} ${(headerTop - 46).toFixed(1)} Tm\n(${pdfEscape(meta.name || "Untitled Incident")}) Tj\n`;
+      stream += "ET\n";
+      stream += `${RED} RG 1.4 w ${MARGIN_X} ${(headerTop - drawH - 8).toFixed(1)} m ${PAGE_W - MARGIN_X} ${(headerTop - drawH - 8).toFixed(1)} l S\n`;
+    }
+
+    stream += "BT\n";
     for (const ln of pageLines) {
       if (ln.kind === "rule") {
-        paths += `${MARGIN_X} ${(ln.y + 3).toFixed(1)} m ${MARGIN_X + ln.width} ${(ln.y + 3).toFixed(1)} l S\n`;
+        stream += "ET\n";
+        stream += `${GREY} RG 0.6 w ${MARGIN_X} ${(ln.y + 3).toFixed(1)} m ${MARGIN_X + ln.width} ${(ln.y + 3).toFixed(1)} l S\n`;
+        stream += "BT\n";
+        continue;
+      }
+      if (ln.kind === "heading") {
+        stream += `/FHB 12 Tf\n1 0 0 1 ${MARGIN_X} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(ln.text)}) Tj\n`;
+        stream += "ET\n";
+        stream += `${RED} RG 1 w ${MARGIN_X} ${(ln.y - 4).toFixed(1)} m ${PAGE_W - MARGIN_X} ${(ln.y - 4).toFixed(1)} l S\n`;
+        stream += "BT\n";
         continue;
       }
       if (ln.kind === "row") {
         for (const cell of ln.cells) {
           const fontKey = ln.font === "HB" ? "FHB" : "FH";
-          text += `/${fontKey} ${ln.size} Tf\n1 0 0 1 ${MARGIN_X + cell.x} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(cell.text)}) Tj\n`;
+          stream += `/${fontKey} ${ln.size} Tf\n1 0 0 1 ${MARGIN_X + cell.x} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(cell.text)}) Tj\n`;
         }
         continue;
       }
       const fontKey = ln.font === "HB" ? "FHB" : "FH";
-      text += `/${fontKey} ${ln.size} Tf\n1 0 0 1 ${MARGIN_X} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(ln.text)}) Tj\n`;
+      stream += `/${fontKey} ${ln.size} Tf\n1 0 0 1 ${MARGIN_X} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(ln.text)}) Tj\n`;
     }
-    text += "ET";
-    const stream = paths ? `${paths}${text}` : text;
-    objects[contentIds[i]] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
-    objects[pageIds[i]] = `<< /Type /Page /Parent ${pagesTreeId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources ${resourcesId} 0 R /Contents ${contentIds[i]} 0 R >>`;
+    stream += `/FH 8 Tf\n1 0 0 1 ${PAGE_W / 2 - 40} 24 Tm\n(Page ${i + 1} of ${totalPages}) Tj\n`;
+    stream += "ET";
+
+    writeObj(contentIds[i], () => push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
+    writeObj(pageIds[i], () => push(`<< /Type /Page /Parent ${pagesTreeId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources ${resourcesId} 0 R /Contents ${contentIds[i]} 0 R >>`));
   });
 
-  objects[pagesTreeId] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
-  objects[catalogId] = `<< /Type /Catalog /Pages ${pagesTreeId} 0 R >>`;
+  writeObj(pagesTreeId, () => push(`<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`));
+  writeObj(catalogId, () => push(`<< /Type /Catalog /Pages ${pagesTreeId} 0 R >>`));
 
-  let out = "%PDF-1.4\n";
-  const offsets = {};
-  const totalObjs = nextId - 1;
-  for (let id = 1; id <= totalObjs; id++) {
-    offsets[id] = out.length;
-    out += `${id} 0 obj\n${objects[id]}\nendobj\n`;
-  }
-  const xrefStart = out.length;
-  out += `xref\n0 ${totalObjs + 1}\n0000000000 65535 f \n`;
-  for (let id = 1; id <= totalObjs; id++) out += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
-  out += `trailer\n<< /Size ${totalObjs + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
-  return out;
+  const xrefStart = pos;
+  push(`xref\n0 ${nextId}\n0000000000 65535 f \n`);
+  for (let id = 1; id < nextId; id++) push(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+  push(`trailer\n<< /Size ${nextId} /Root ${catalogId} 0 R >>\nstartxref\n${xrefStart}\n%%EOF`);
+
+  return parts;
 }
 
-function downloadPacketPdf(data) {
-  const pdfString = buildSimplePdf(buildPacketLines(data));
-  const blob = new Blob([pdfString], { type: "application/pdf" });
+// Decodes the embedded KFD patch PNG into raw RGB pixel bytes via an
+// offscreen canvas — needed because the hand-built PDF above embeds
+// the image as a raw DeviceRGB stream rather than relying on a PDF
+// library to handle PNG decoding for us.
+function loadLogoRGB(dataUri, maxDim = 130) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h).data;
+        const rgb = new Uint8Array(w * h * 3);
+        for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+          rgb[j] = data[i]; rgb[j + 1] = data[i + 1]; rgb[j + 2] = data[i + 2];
+        }
+        resolve({ width: w, height: h, rgb });
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUri;
+    } catch { resolve(null); }
+  });
+}
+
+async function downloadPacketPdf(data) {
+  const logo = await loadLogoRGB(KFD_PATCH_DATA_URI);
+  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: data.incident.name });
+  const blob = new Blob(parts, { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
