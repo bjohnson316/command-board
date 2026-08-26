@@ -13,8 +13,15 @@ import {
    ============================================================ */
 
 export async function loadIndex() {
-  const snap = await getDoc(doc(db, "icMeta", "index"));
-  return snap.exists() ? snap.data().list || [] : [];
+  try {
+    const snap = await getDoc(doc(db, "icMeta", "index"));
+    return snap.exists() ? snap.data().list || [] : [];
+  } catch {
+    // No cached copy and no network (e.g. very first launch on a
+    // device that's never been online) — degrade to an empty list
+    // rather than leaving the app stuck on a loading screen.
+    return [];
+  }
 }
 
 export async function saveIndex(list) {
@@ -22,8 +29,12 @@ export async function saveIndex(list) {
 }
 
 export async function loadIncidentBlob(id) {
-  const snap = await getDoc(doc(db, "icIncidents", id));
-  return snap.exists() ? snap.data() : null;
+  try {
+    const snap = await getDoc(doc(db, "icIncidents", id));
+    return snap.exists() ? snap.data() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveIncidentBlob(id, blob) {
@@ -39,8 +50,12 @@ export async function deleteIncidentBlob(id) {
 // only (see PinGate.jsx); Firestore rules stay open, so this deters a
 // casually-shared link but is not a security boundary on its own.
 export async function loadPinConfig() {
-  const snap = await getDoc(doc(db, "icMeta", "config"));
-  return snap.exists() ? snap.data() : null;
+  try {
+    const snap = await getDoc(doc(db, "icMeta", "config"));
+    return snap.exists() ? snap.data() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function savePinConfig(cfg) {

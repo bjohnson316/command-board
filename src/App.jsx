@@ -1058,15 +1058,61 @@ const TABS = [
   { k: "214", label: "ICS-214 Logs", icon: ArrowRightLeft },
 ];
 
-export default function App() {
+// Rendered at the very top of the tree, outside PinGate, so the dark
+// theme's page reset (no white margin/background) is active even
+// before the PIN gate decides what to show — otherwise the browser's
+// default white body margin is visible around the lock screen.
+function GlobalStyles() {
   return (
-    <PinGate>
-      {(lock) => <AppInner onLock={lock} />}
-    </PinGate>
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+      * { box-sizing: border-box; }
+      html, body, #root { margin: 0; padding: 0; min-height: 100%; background: ${COLORS.bg}; }
+      select { -webkit-appearance: none; }
+      input:focus, textarea:focus, select:focus { border-color: ${COLORS.amber} !important; }
+      ::-webkit-scrollbar { height: 8px; width: 8px; }
+      ::-webkit-scrollbar-thumb { background: ${COLORS.line}; border-radius: 4px; }
+      .print-only { display: none; }
+      @media print {
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+      }
+    `}</style>
   );
 }
 
+export default function App() {
+  return (
+    <>
+      <GlobalStyles />
+      <PinGate>
+        {(lock) => <AppInner onLock={lock} />}
+      </PinGate>
+    </>
+  );
+}
+
+// Tracks browser connectivity so the UI can tell the crew when they're
+// on cached/offline data versus live. navigator.onLine reflects network
+// interface state, not whether Firestore specifically can reach its
+// servers, but it's a reliable enough signal for this purpose.
+function useOnlineStatus() {
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+  return online;
+}
+
 function AppInner({ onLock }) {
+  const online = useOnlineStatus();
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("201");
   const [showLib, setShowLib] = useState(false);
@@ -1174,21 +1220,6 @@ function AppInner({ onLock }) {
 
   return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; }
-        body { margin: 0; }
-        select { -webkit-appearance: none; }
-        input:focus, textarea:focus, select:focus { border-color: ${COLORS.amber} !important; }
-        ::-webkit-scrollbar { height: 8px; width: 8px; }
-        ::-webkit-scrollbar-thumb { background: ${COLORS.line}; border-radius: 4px; }
-        .print-only { display: none; }
-        @media print {
-          .no-print { display: none !important; }
-          .print-only { display: block !important; }
-        }
-      `}</style>
-
       {incidentLoaded && (
         <div className="no-print">
         {/* HEADER */}
@@ -1220,6 +1251,12 @@ function AppInner({ onLock }) {
                 style={{ padding: "5px 9px", fontSize: 12 }}>
                 {incident.opEnd ? "Resume Clock" : "Stop Clock"}
               </Btn>
+              {!online && (
+                <span style={{ fontSize: 11, color: COLORS.amber, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.amber, display: "inline-block" }} />
+                  offline — changes will sync when reconnected
+                </span>
+              )}
               <span style={{ fontSize: 11, color: saveState === "synced" ? COLORS.teal : COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>
                 {saveState === "saving" ? "saving…" : saveState === "synced" ? "● updated by another user" : saveState === "saved" ? "● synced to shared board" : ""}
               </span>
