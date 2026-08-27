@@ -1950,10 +1950,10 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   push(`Conditions: ${incident.conditions || "-"}`, "H", 10);
   blank();
 
-  heading(L, "ICS-201 · Incident Briefing");
-  push(`Date/Time Initiated: ${incident.dateInitiated || "-"} ${incident.timeInitiated || ""}`, "H", 9);
   if (include("201full")) {
     heading(L, "ICS-201 · Incident Briefing");
+    push(`Date/Time Initiated: ${incident.dateInitiated || "-"} ${incident.timeInitiated || ""}`, "H", 9);
+    blank();
     push("Situation Summary and Health/Safety Briefing:", "HB", 9);
     wrapPush(L, incident.situation);
     blank();
@@ -1975,11 +1975,11 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     blank();
 
     L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
-      (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary (Ordered)"));
+      (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
   }
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
-    resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status (not on official form)"));
+    resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
 
   heading(L, "9. Current Organization");
   const orgLines = [
