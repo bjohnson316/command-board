@@ -428,24 +428,44 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
    ============================================================ */
 function ResourceForm({ onAdd, unitPresets, onSavePreset }) {
   const [f, setF] = useState({ label: "", kind: RESOURCE_KINDS[0], personnel: 1, assignment: "" });
+  const [addingNew, setAddingNew] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+
   const submit = () => {
     if (!f.label.trim()) return;
     onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, personnel: Number(f.personnel) || 1, assignment: f.assignment, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "" });
   };
-  const isNewUnit = f.label.trim() && !unitPresets.includes(f.label.trim());
+
+  const confirmAddUnit = () => {
+    const name = newUnitName.trim();
+    if (!name) return;
+    onSavePreset(name);
+    setF({ ...f, label: name });
+    setAddingNew(false);
+    setNewUnitName("");
+  };
+
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
       <Field label="Unit / Resource ID">
-        <div style={{ display: "flex", gap: 4 }}>
-          <TextInput list="unit-presets" value={f.label} onChange={e => setF({ ...f, label: e.target.value })} placeholder="Engine 21, Crew 3, Med 1..." style={{ width: 180 }} onKeyDown={e => e.key === "Enter" && submit()} />
-          {isNewUnit && (
-            <button onClick={() => onSavePreset(f.label.trim())} title="Save as a quick-pick unit for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
-              <Star size={14} />
-            </button>
-          )}
-        </div>
-        <datalist id="unit-presets">{unitPresets.map(u => <option key={u} value={u} />)}</datalist>
+        {addingNew ? (
+          <div style={{ display: "flex", gap: 4 }}>
+            <TextInput autoFocus value={newUnitName} onChange={e => setNewUnitName(e.target.value)} placeholder="New unit name" style={{ width: 150 }}
+              onKeyDown={e => { if (e.key === "Enter") confirmAddUnit(); if (e.key === "Escape") setAddingNew(false); }} />
+            <Btn kind="solid" onClick={confirmAddUnit} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingNew(false)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ) : (
+          <Select value={f.label} onChange={e => {
+            if (e.target.value === "__add_new__") { setAddingNew(true); setNewUnitName(""); }
+            else setF({ ...f, label: e.target.value });
+          }} style={{ width: 200 }}>
+            <option value="">Select a unit...</option>
+            {unitPresets.map(u => <option key={u} value={u}>{u}</option>)}
+            <option value="__add_new__">+ Add Unit</option>
+          </Select>
+        )}
       </Field>
       <Field label="Type">
         <Select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })} style={{ width: 150 }}>
