@@ -3,12 +3,13 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers, Star
+  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
   deleteIncidentBlob, watchIncident, loadPinConfig, savePinConfig,
   loadPresets, savePresets,
+  loadAttachments, saveAttachment, deleteAttachment, deleteAllAttachments,
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
 import PinGate from "./PinGate.jsx";
@@ -1555,6 +1556,109 @@ function TabICSForms(props) {
   );
 }
 
+const MAX_ATTACHMENT_BYTES = 700 * 1024; // ~700KB raw — base64 inflates
+// this ~33%, keeping each attachment document safely under Firestore's
+// 1MB-per-document cap with room for metadata overhead.
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadAttachmentFile(a) {
+  const byteChars = atob(a.dataBase64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([new Uint8Array(byteNumbers)], { type: a.type || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = a.name;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function TabAttachments({ attachments, onUpload, onDelete }) {
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFiles = async (files) => {
+    setError("");
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setError(`"${file.name}" is ${fmtBytes(file.size)} — the limit is ${fmtBytes(MAX_ATTACHMENT_BYTES)}. Try a smaller photo or a compressed file.`);
+        continue;
+      }
+      setUploading(true);
+      try {
+        await onUpload(file);
+      } catch {
+        setError(`Failed to upload "${file.name}".`);
+      }
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Panel title="Attachments" icon={Paperclip}
+        right={
+          <>
+            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
+              onChange={e => { handleFiles(Array.from(e.target.files)); e.target.value = ""; }} />
+            <Btn kind="subtle" icon={Plus} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              {uploading ? "Uploading…" : "Add File"}
+            </Btn>
+          </>
+        }>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 12, lineHeight: 1.5 }}>
+          Photos and documents attached to this incident — included in Print/Export (photos embed directly as pages; other file types are listed by name). Limit {fmtBytes(MAX_ATTACHMENT_BYTES)} per file.
+        </div>
+        {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        {attachments.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint }}>No attachments yet.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
+          {attachments.map(a => {
+            const isImage = (a.type || "").startsWith("image/");
+            return (
+              <div key={a.id} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {isImage ? (
+                  <img src={`data:${a.type};base64,${a.dataBase64}`} alt={a.name} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 4 }} />
+                ) : (
+                  <div style={{ width: "100%", height: 100, display: "flex", alignItems: "center", justifyContent: "center", background: COLORS.panel, borderRadius: 4 }}>
+                    <FileText size={32} color={COLORS.muted} />
+                  </div>
+                )}
+                <div style={{ fontSize: 12, fontWeight: 600, wordBreak: "break-word" }}>{a.name}</div>
+                <div style={{ fontSize: 10.5, color: COLORS.muted }}>{fmtBytes(a.size || 0)} · {fmtDate(a.uploadedAt)}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn kind="subtle" onClick={() => downloadAttachmentFile(a)} style={{ flex: 1, justifyContent: "center", padding: "5px 8px", fontSize: 11.5 }}>Download</Btn>
+                  <button onClick={() => onDelete(a.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 function Tab214({ logs, setLogs }) {
   const [activeLog, setActiveLog] = useState(logs[0]?.id || null);
   useEffect(() => { if (!logs.find(l => l.id === activeLog)) setActiveLog(logs[0]?.id || null); }, [logs]);
@@ -1759,7 +1863,7 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -1774,6 +1878,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   ics209 = { ...defaultIcs209(), ...(ics209 || {}) };
   ics206 = { ...defaultIcs206(), ...(ics206 || {}) };
   logs = logs || [];
+  attachments = attachments || [];
   // Older saved incidents (or a first export before any form was
   // checked) won't have this — fall back to "everything included"
   // rather than silently producing an empty packet.
@@ -1936,6 +2041,13 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     });
   }
   }
+
+  const nonImageAttachments = (attachments || []).filter(a => !(a.type || "").startsWith("image/"));
+  if (nonImageAttachments.length > 0) {
+    heading(L, "Attached Documents");
+    L.push(...tableLines(["FILE NAME", "TYPE", "SIZE"], [280, 130, 100],
+      nonImageAttachments.map(a => [a.name, a.type || "unknown", `${((a.size || 0) / 1024).toFixed(0)} KB`])));
+  }
   return L;
 }
 
@@ -1944,7 +2056,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 // than one big string, because a JS string containing raw bytes >127
 // gets mangled by UTF-8 re-encoding when passed to Blob — binary data
 // has to travel as an actual typed array, not characters in a string.
-function buildSimplePdf(lines, logo, meta) {
+function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
   const PAGE_W = 612, PAGE_H = 792, MARGIN_X = 40, MARGIN_BOTTOM = 46;
   // Header layout computed once, up front, so pagination (which needs
   // to know how much vertical space the header eats on page 1) and the
@@ -1972,7 +2084,10 @@ function buildSimplePdf(lines, logo, meta) {
     y -= lh;
   }
   pages.push(cur);
-  const totalPages = pages.length;
+  // Attachment photos each get their own dedicated page, appended
+  // after the flowing text content — counted into the total up front
+  // so "Page X of Y" is correct on every page, including the text ones.
+  const totalPages = pages.length + attachmentImages.length;
 
   const parts = [];
   let pos = 0;
@@ -1990,6 +2105,9 @@ function buildSimplePdf(lines, logo, meta) {
   const imageId = logo ? reserve() : null;
   const pageIds = pages.map(() => reserve());
   const contentIds = pages.map(() => reserve());
+  const attImageIds = attachmentImages.map(() => reserve());
+  const attPageIds = attachmentImages.map(() => reserve());
+  const attContentIds = attachmentImages.map(() => reserve());
 
   const offsets = {};
   const writeObj = (id, body) => {
@@ -2008,8 +2126,19 @@ function buildSimplePdf(lines, logo, meta) {
       push(`\nendstream`);
     });
   }
-  const resourcesDict = logo
-    ? `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> /XObject << /Logo ${imageId} 0 R >> >>`
+  attachmentImages.forEach((img, idx) => {
+    writeObj(attImageIds[idx], () => {
+      push(`<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${img.rgb.byteLength} >>\nstream\n`);
+      push(img.rgb);
+      push(`\nendstream`);
+    });
+  });
+  const xobjectEntries = [
+    logo ? `/Logo ${imageId} 0 R` : "",
+    ...attachmentImages.map((_, idx) => `/AttImg${idx} ${attImageIds[idx]} 0 R`),
+  ].filter(Boolean).join(" ");
+  const resourcesDict = xobjectEntries
+    ? `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> /XObject << ${xobjectEntries} >> >>`
     : `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> >>`;
   writeObj(resourcesId, () => push(resourcesDict));
 
@@ -2064,7 +2193,23 @@ function buildSimplePdf(lines, logo, meta) {
     writeObj(pageIds[i], () => push(`<< /Type /Page /Parent ${pagesTreeId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources ${resourcesId} 0 R /Contents ${contentIds[i]} 0 R >>`));
   });
 
-  writeObj(pagesTreeId, () => push(`<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`));
+  attachmentImages.forEach((img, idx) => {
+    const availW = PAGE_W - 2 * MARGIN_X;
+    const availH = PAGE_H - 100;
+    const scale = Math.min(availW / img.width, availH / img.height);
+    const drawImgW = img.width * scale, drawImgH = img.height * scale;
+    const x = MARGIN_X + (availW - drawImgW) / 2;
+    const y = PAGE_H - 50 - drawImgH;
+    let stream = `q ${drawImgW.toFixed(1)} 0 0 ${drawImgH.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)} cm /AttImg${idx} Do Q\n`;
+    stream += "BT\n";
+    stream += `/FHB 10 Tf\n1 0 0 1 ${MARGIN_X} ${(y - 18).toFixed(1)} Tm\n(${pdfEscape(img.caption || "Attachment")}) Tj\n`;
+    stream += `/FH 8 Tf\n1 0 0 1 ${PAGE_W / 2 - 40} 24 Tm\n(Page ${pages.length + idx + 1} of ${totalPages}) Tj\n`;
+    stream += "ET";
+    writeObj(attContentIds[idx], () => push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
+    writeObj(attPageIds[idx], () => push(`<< /Type /Page /Parent ${pagesTreeId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources ${resourcesId} 0 R /Contents ${attContentIds[idx]} 0 R >>`));
+  });
+
+  writeObj(pagesTreeId, () => push(`<< /Type /Pages /Kids [${[...pageIds, ...attPageIds].map(id => `${id} 0 R`).join(" ")}] /Count ${pageIds.length + attPageIds.length} >>`));
   writeObj(catalogId, () => push(`<< /Type /Catalog /Pages ${pagesTreeId} 0 R >>`));
 
   const xrefStart = pos;
@@ -2110,7 +2255,17 @@ async function downloadPacketPdf(data) {
   const logo = await loadLogoRGB(KFD_PATCH_DATA_URI);
   const inc = data.incident || {};
   const started = [inc.dateInitiated, inc.timeInitiated].filter(Boolean).join(" ") || (inc.opStart ? new Date(inc.opStart).toLocaleString() : "");
-  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: inc.name, started });
+  // Image attachments get decoded and embedded as their own pages;
+  // non-image attachments (PDFs, Word docs, etc.) are listed by name
+  // in the report body instead (buildPacketLines handles that part —
+  // see the "attachments" list passed through in `data`).
+  const imageAttachments = (data.attachments || []).filter(a => (a.type || "").startsWith("image/"));
+  const attachmentImages = [];
+  for (const a of imageAttachments) {
+    const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
+    if (decoded) attachmentImages.push({ ...decoded, caption: a.name });
+  }
+  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: inc.name, started }, attachmentImages);
   const blob = new Blob(parts, { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2535,6 +2690,7 @@ const TABS = [
   { k: "org", label: "Org Chart", icon: Users },
   { k: "rehab", label: "Rehab", icon: HeartPulse },
   { k: "icsforms", label: "ICS Forms", icon: Layers },
+  { k: "attachments", label: "Attachments", icon: Paperclip },
 ];
 
 // Rendered at the very top of the tree, outside PinGate, so the dark
@@ -2611,6 +2767,7 @@ function AppInner({ onLock }) {
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
   const [presets, setPresets] = useState({ units: [], objectives: [] });
   const [formsUsed, setFormsUsed] = useState({});
+  const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
   const [incidentLoaded, setIncidentLoaded] = useState(false);
   const [index, setIndex] = useState([]);
@@ -2758,19 +2915,34 @@ function AppInner({ onLock }) {
 
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {} });
+    setAttachments([]);
     setIncidentLoaded(true);
     setShowLib(false);
   };
   const openIncident = async (id) => {
     const blob = await loadIncidentBlob(id);
     if (blob) applyBlob(blob);
+    const atts = await loadAttachments(id);
+    setAttachments(atts);
     setIncidentLoaded(true);
     setShowLib(false);
+  };
+  const uploadAttachment = async (file) => {
+    const dataBase64 = await fileToBase64(file);
+    const attId = uid();
+    const data = { name: file.name, type: file.type, size: file.size, dataBase64, uploadedAt: nowISO() };
+    await saveAttachment(incident.id, attId, data);
+    setAttachments(prev => [...prev, { id: attId, ...data }]);
+  };
+  const removeAttachment = async (attId) => {
+    await deleteAttachment(incident.id, attId);
+    setAttachments(prev => prev.filter(a => a.id !== attId));
   };
   const deleteIncident = async (id) => {
     const nextIndex = index.filter(i => i.id !== id);
     setIndex(nextIndex);
     await saveIndex(nextIndex);
+    await deleteAllAttachments(id);
     await deleteIncidentBlob(id);
   };
 
@@ -2792,7 +2964,10 @@ function AppInner({ onLock }) {
   };
   const exportArchivedIncident = async (id) => {
     const blob = await loadIncidentBlob(id);
-    if (blob) await downloadPacketPdf(blob);
+    if (blob) {
+      const atts = await loadAttachments(id);
+      await downloadPacketPdf({ ...blob, attachments: atts });
+    }
   };
 
   const typeInfo = INCIDENT_TYPES.find(t => t.v === incident.type) || INCIDENT_TYPES[0];
@@ -2840,7 +3015,7 @@ function AppInner({ onLock }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed })}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments })}>Print / Export</Btn>
               <Btn kind="ghost" onClick={() => setShowChangePin(true)} style={{ padding: "6px 9px", fontSize: 12 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 9px", fontSize: 12 }}>Lock</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
@@ -2890,6 +3065,7 @@ function AppInner({ onLock }) {
                   formsUsed={formsUsed} toggleFormUsed={toggleFormUsed}
                 />
               )}
+              {tab === "attachments" && <TabAttachments attachments={attachments} onUpload={uploadAttachment} onDelete={removeAttachment} />}
             </>
           )}
         </div>
