@@ -2532,7 +2532,7 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
           <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 12, lineHeight: 1.5 }}>
             {mandatory ? "Select an incident to open, or start a new one." : "Shared board — visible and editable by anyone who opens this app. Changes sync to other users within a few seconds."}
           </div>
-          <Btn kind="solid" icon={Plus} onClick={onNew} style={{ marginBottom: 14, width: "100%", justifyContent: "center" }}>Start New Incident</Btn>
+          <Btn kind="solid" icon={Plus} onClick={() => setConfirmAction({ type: "new" })} style={{ marginBottom: 14, width: "100%", justifyContent: "center" }}>Start New Incident</Btn>
           {active.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13 }}>No active incidents.</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {active.map(item => (
@@ -2559,14 +2559,18 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
 
       {confirmAction && (
         <PasswordConfirmModal
-          title={confirmAction.type === "archive" ? "Confirm Archive" : "Confirm Delete"}
+          title={confirmAction.type === "archive" ? "Confirm Archive" : confirmAction.type === "delete" ? "Confirm Delete" : "Confirm New Incident"}
           message={
             confirmAction.type === "archive"
               ? `Enter the archive password to archive "${confirmAction.name || "Unnamed Incident"}".`
-              : `Enter the archive password to permanently delete "${confirmAction.name || "Unnamed Incident"}". This can't be undone.`
+              : confirmAction.type === "delete"
+                ? `Enter the archive password to permanently delete "${confirmAction.name || "Unnamed Incident"}". This can't be undone.`
+                : "Enter the archive password to start a new incident."
           }
           onConfirm={() => {
-            (confirmAction.type === "archive" ? onArchive : onDelete)(confirmAction.id);
+            if (confirmAction.type === "archive") onArchive(confirmAction.id);
+            else if (confirmAction.type === "delete") onDelete(confirmAction.id);
+            else onNew();
             setConfirmAction(null);
           }}
           onCancel={() => setConfirmAction(null)}
