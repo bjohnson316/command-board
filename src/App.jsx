@@ -105,6 +105,7 @@ function blankIncident() {
     objectives: [""],
     actionsLog: [],
     resourceOrders: [],
+    mapSketch: "",
   };
 }
 
@@ -123,7 +124,7 @@ function normalizeIncident(inc) {
   return {
     prepPosition: "", prepSignature: "", prepDateTime: "",
     dateInitiated: "", timeInitiated: "",
-    actionsLog: [], resourceOrders: [],
+    actionsLog: [], resourceOrders: [], mapSketch: "",
     ...migrated,
   };
 }
@@ -315,22 +316,17 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
   const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
   const removeAction = (id) => setIncident({ ...incident, actionsLog: incident.actionsLog.filter(a => a.id !== id) });
 
-  const addOrder = () => setIncident({ ...incident, resourceOrders: [...incident.resourceOrders, { id: uid(), resource: "", identifier: "", ordered: "", eta: "", arrived: false, notes: "" }] });
-  const updateOrder = (id, patch) => setIncident({ ...incident, resourceOrders: incident.resourceOrders.map(r => r.id === id ? { ...r, ...patch } : r) });
-  const removeOrder = (id) => setIncident({ ...incident, resourceOrders: incident.resourceOrders.filter(r => r.id !== id) });
-
   const counts = STATUS_FLOW.map(s => ({ status: s, n: resources.filter(r => r.status === s).length }));
-  const cell = { padding: "6px 6px", fontSize: 12.5, verticalAlign: "top" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Panel title="ICS-201 · Incident Briefing" icon={ClipboardList}>
+      <Panel title="Tactical Worksheet" icon={ClipboardList}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Field label="1. Incident Name"><TextInput value={incident.name} onChange={e => setIncident({ ...incident, name: e.target.value })} placeholder="e.g. County Rd 411 Structure" /></Field>
-          <Field label="2. Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} placeholder="Dispatch / CAD #" /></Field>
+          <Field label="Incident Name"><TextInput value={incident.name} onChange={e => setIncident({ ...incident, name: e.target.value })} placeholder="e.g. County Rd 411 Structure" /></Field>
+          <Field label="Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} placeholder="Dispatch / CAD #" /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
-          <Field label="3. Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
+          <Field label="Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
           <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
@@ -352,14 +348,14 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         </div>
 
         <div style={{ marginTop: 14 }}>
-          <Field label="5. Situation Summary and Health and Safety Briefing" wide>
+          <Field label="Situation Summary and Health and Safety Briefing" wide>
             <TextArea value={incident.situation} onChange={e => setIncident({ ...incident, situation: e.target.value })} style={{ minHeight: 90 }}
               placeholder="Recognize potential incident health and safety hazards and note measures taken to protect responders (remove hazard, PPE, warn people)..." />
           </Field>
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>7. Current and Planned Objectives</div>
+          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>Current and Planned Objectives</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {incident.objectives.map((o, i) => {
               const isNewObjective = o.trim() && !objectivePresets.includes(o.trim());
@@ -382,7 +378,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>8. Current and Planned Actions, Strategies, and Tactics</div>
+          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>Current and Planned Actions, Strategies, and Tactics</div>
           {incident.actionsLog.map(a => (
             <div key={a.id} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
               <TextInput type="time" value={a.time} onChange={e => updateAction(a.id, { time: e.target.value })} style={{ width: 130 }} />
@@ -394,10 +390,10 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>
-          9. Current Organization — see the Org Chart tab (Incident Commander(s), Section Chiefs, Safety Officer, PIO, Liaison Officer)
+          Current Organization — see the Org Chart tab (Incident Commander(s), Section Chiefs, Safety Officer, PIO, Liaison Officer)
         </div>
 
-        <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>6. Prepared By</div>
+        <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>Prepared By</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
           <Field label="Name"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
           <Field label="Position / Title"><TextInput value={incident.prepPosition} onChange={e => setIncident({ ...incident, prepPosition: e.target.value })} /></Field>
@@ -406,32 +402,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         </div>
       </Panel>
 
-      <Panel title="10. Resource Summary" icon={Truck} right={<Btn kind="subtle" icon={Plus} onClick={addOrder}>Add Resource</Btn>}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
-            <th style={cell}>Resource</th><th style={cell}>Resource Identifier</th><th style={cell}>Date/Time Ordered</th>
-            <th style={cell}>ETA</th><th style={cell}>Arrived</th><th style={cell}>Notes (location/assignment/status)</th><th style={cell}></th>
-          </tr></thead>
-          <tbody>
-            {incident.resourceOrders.map(r => (
-              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <td style={cell}><TextInput value={r.resource} onChange={e => updateOrder(r.id, { resource: e.target.value })} style={{ width: 130 }} /></td>
-                <td style={cell}><TextInput value={r.identifier} onChange={e => updateOrder(r.id, { identifier: e.target.value })} style={{ width: 110 }} /></td>
-                <td style={cell}><TextInput type="datetime-local" value={r.ordered} onChange={e => updateOrder(r.id, { ordered: e.target.value })} style={{ width: 170 }} /></td>
-                <td style={cell}><TextInput type="time" value={r.eta} onChange={e => updateOrder(r.id, { eta: e.target.value })} style={{ width: 110 }} /></td>
-                <td style={cell}>
-                  <input type="checkbox" checked={r.arrived} onChange={e => updateOrder(r.id, { arrived: e.target.checked })} style={{ width: 18, height: 18 }} />
-                </td>
-                <td style={cell}><TextInput value={r.notes} onChange={e => updateOrder(r.id, { notes: e.target.value })} style={{ width: 180 }} /></td>
-                <td style={cell}><button onClick={() => removeOrder(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {incident.resourceOrders.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
-      </Panel>
-
-      <Panel title="Resource Board Status (auto, not on official form)" icon={Truck}>
+      <Panel title="Resource Board Status" icon={Truck}>
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, 1fr)`, gap: 10 }}>
           {counts.map(c => (
             <div key={c.status} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: "10px 8px", textAlign: "center" }}>
@@ -1401,7 +1372,133 @@ function Tab206({ ics206, setIcs206, incident }) {
    208 HM / 209 / 206 / 214 so they share one tab slot instead of
    six separate tabs across the header.
    ============================================================ */
+// Full, officially-numbered ICS-201 (blocks 1-10 per the FEMA form),
+// as distinct from the streamlined "Tactical Worksheet" tab — both
+// read/write the same underlying incident fields, so filling in one
+// updates the other. This is the one that includes the Resource
+// Summary table (Block 10), matching the official form exactly.
+function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset }) {
+  const updateObjective = (i, val) => {
+    const next = [...incident.objectives]; next[i] = val;
+    setIncident({ ...incident, objectives: next });
+  };
+  const addObjective = () => setIncident({ ...incident, objectives: [...incident.objectives, ""] });
+  const removeObjective = (i) => setIncident({ ...incident, objectives: incident.objectives.filter((_, idx) => idx !== i) });
+
+  const addAction = () => setIncident({ ...incident, actionsLog: [...incident.actionsLog, { id: uid(), time: "", actions: "" }] });
+  const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
+  const removeAction = (id) => setIncident({ ...incident, actionsLog: incident.actionsLog.filter(a => a.id !== id) });
+
+  const addOrder = () => setIncident({ ...incident, resourceOrders: [...incident.resourceOrders, { id: uid(), resource: "", identifier: "", ordered: "", eta: "", arrived: false, notes: "" }] });
+  const updateOrder = (id, patch) => setIncident({ ...incident, resourceOrders: incident.resourceOrders.map(r => r.id === id ? { ...r, ...patch } : r) });
+  const removeOrder = (id) => setIncident({ ...incident, resourceOrders: incident.resourceOrders.filter(r => r.id !== id) });
+
+  const cell = { padding: "6px 6px", fontSize: 12.5, verticalAlign: "top" };
+  const orgLines = [
+    ...CG_POSITIONS.filter(p => org.positions[p]).map(p => `${p}: ${org.positions[p]}`),
+    ...SECTION_CHIEFS.filter(p => org.positions[p]).map(p => `${p}: ${org.positions[p]}`),
+    ...org.divisions.filter(d => d.name).map(d => `${d.name} - Supv: ${d.supervisor || "-"}`),
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Panel title="ICS-201 · Incident Briefing (Official Form)" icon={ClipboardList}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <Field label="1. Incident Name"><TextInput value={incident.name} onChange={e => setIncident({ ...incident, name: e.target.value })} /></Field>
+          <Field label="2. Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} /></Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+          <Field label="3. Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
+          <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <Field label="4. Map/Sketch (perimeter, resource assignments, incident facilities — attach separately or describe here)" wide>
+            <TextArea value={incident.mapSketch || ""} onChange={e => setIncident({ ...incident, mapSketch: e.target.value })} style={{ minHeight: 70 }} />
+          </Field>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <Field label="5. Situation Summary and Health and Safety Briefing" wide>
+            <TextArea value={incident.situation} onChange={e => setIncident({ ...incident, situation: e.target.value })} style={{ minHeight: 90 }} />
+          </Field>
+        </div>
+        <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>6. Prepared By</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+          <Field label="Name"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
+          <Field label="Position / Title"><TextInput value={incident.prepPosition} onChange={e => setIncident({ ...incident, prepPosition: e.target.value })} /></Field>
+          <Field label="Signature"><TextInput value={incident.prepSignature} onChange={e => setIncident({ ...incident, prepSignature: e.target.value })} placeholder="Type name to sign" /></Field>
+          <Field label="Date / Time"><TextInput type="datetime-local" value={incident.prepDateTime} onChange={e => setIncident({ ...incident, prepDateTime: e.target.value })} /></Field>
+        </div>
+      </Panel>
+
+      <Panel title="7. Current and Planned Objectives" icon={ClipboardList}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {incident.objectives.map((o, i) => {
+            const isNewObjective = o.trim() && !objectivePresets.includes(o.trim());
+            return (
+              <div key={i} style={{ display: "flex", gap: 8 }}>
+                <span style={{ width: 22, textAlign: "right", color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, paddingTop: 9 }}>{i + 1}.</span>
+                <TextInput list="objective-presets" value={o} onChange={e => updateObjective(i, e.target.value)} style={{ flex: 1 }} placeholder="Objective..." />
+                {isNewObjective && (
+                  <button onClick={() => onSavePreset(o.trim())} title="Save as a quick-pick objective for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
+                    <Star size={14} />
+                  </button>
+                )}
+                <Btn kind="danger" onClick={() => removeObjective(i)}><Trash2 size={14} /></Btn>
+              </div>
+            );
+          })}
+          <datalist id="objective-presets">{objectivePresets.map(p => <option key={p} value={p} />)}</datalist>
+          <Btn kind="subtle" icon={Plus} onClick={addObjective} style={{ alignSelf: "flex-start" }}>Add Objective</Btn>
+        </div>
+      </Panel>
+
+      <Panel title="8. Current and Planned Actions, Strategies, and Tactics" icon={ClipboardList} right={<Btn kind="subtle" icon={Plus} onClick={addAction}>Add Entry</Btn>}>
+        {incident.actionsLog.map(a => (
+          <div key={a.id} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <TextInput type="time" value={a.time} onChange={e => updateAction(a.id, { time: e.target.value })} style={{ width: 130 }} />
+            <TextInput value={a.actions} onChange={e => updateAction(a.id, { actions: e.target.value })} placeholder="Actions..." style={{ flex: 1 }} />
+            <button onClick={() => removeAction(a.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button>
+          </div>
+        ))}
+        {incident.actionsLog.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
+      </Panel>
+
+      <Panel title="9. Current Organization" icon={Users}>
+        {orgLines.length === 0
+          ? <div style={{ fontSize: 13, color: COLORS.faint }}>None entered — fill in on the Org Chart tab.</div>
+          : <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.8 }}>{orgLines.map((l, i) => <li key={i}>{l}</li>)}</ul>}
+      </Panel>
+
+      <Panel title="10. Resource Summary" icon={Truck} right={<Btn kind="subtle" icon={Plus} onClick={addOrder}>Add Resource</Btn>}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+            <th style={cell}>Resource</th><th style={cell}>Resource Identifier</th><th style={cell}>Date/Time Ordered</th>
+            <th style={cell}>ETA</th><th style={cell}>Arrived</th><th style={cell}>Notes (location/assignment/status)</th><th style={cell}></th>
+          </tr></thead>
+          <tbody>
+            {incident.resourceOrders.map(r => (
+              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={cell}><TextInput value={r.resource} onChange={e => updateOrder(r.id, { resource: e.target.value })} style={{ width: 130 }} /></td>
+                <td style={cell}><TextInput value={r.identifier} onChange={e => updateOrder(r.id, { identifier: e.target.value })} style={{ width: 110 }} /></td>
+                <td style={cell}><TextInput type="datetime-local" value={r.ordered} onChange={e => updateOrder(r.id, { ordered: e.target.value })} style={{ width: 170 }} /></td>
+                <td style={cell}><TextInput type="time" value={r.eta} onChange={e => updateOrder(r.id, { eta: e.target.value })} style={{ width: 110 }} /></td>
+                <td style={cell}>
+                  <input type="checkbox" checked={r.arrived} onChange={e => updateOrder(r.id, { arrived: e.target.checked })} style={{ width: 18, height: 18 }} />
+                </td>
+                <td style={cell}><TextInput value={r.notes} onChange={e => updateOrder(r.id, { notes: e.target.value })} style={{ width: 180 }} /></td>
+                <td style={cell}><button onClick={() => removeOrder(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {incident.resourceOrders.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
+      </Panel>
+    </div>
+  );
+}
+
 const ICS_FORM_OPTIONS = [
+  { k: "201full", label: "ICS-201 · Incident Briefing" },
   { k: "205", label: "ICS-205 · Communications Plan" },
   { k: "215a", label: "ICS-215A · Safety Analysis" },
   { k: "208", label: "ICS-208 · Safety Message/Plan" },
@@ -1412,7 +1509,7 @@ const ICS_FORM_OPTIONS = [
 ];
 
 function TabICSForms(props) {
-  const [selected, setSelected] = useState("205");
+  const [selected, setSelected] = useState("201full");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1421,6 +1518,7 @@ function TabICSForms(props) {
           {ICS_FORM_OPTIONS.map(o => <option key={o.k} value={o.k}>{o.label}</option>)}
         </Select>
       </div>
+      {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivePresets={props.objectivePresets} onSavePreset={props.onSavePreset} />}
       {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} incident={props.incident} />}
       {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
       {selected === "208" && <Tab208 ics208={props.ics208} setIcs208={props.setIcs208} incident={props.incident} />}
@@ -2298,7 +2396,7 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
    APP
    ============================================================ */
 const TABS = [
-  { k: "201", label: "ICS-201 Briefing", icon: ClipboardList },
+  { k: "201", label: "Tactical Worksheet", icon: ClipboardList },
   { k: "resources", label: "Resource Board", icon: Truck },
   { k: "org", label: "Org Chart", icon: Users },
   { k: "rehab", label: "Rehab", icon: HeartPulse },
@@ -2609,12 +2707,13 @@ function AppInner({ onLock }) {
                 <TabICSForms
                   comms={comms} setComms={setComms}
                   safety={safety} setSafety={setSafety}
-                  org={org} incident={incident}
+                  org={org} incident={incident} setIncident={setIncident}
                   ics208={ics208} setIcs208={setIcs208}
                   ics208hm={ics208hm} setIcs208hm={setIcs208hm}
                   ics209={ics209} setIcs209={setIcs209}
                   ics206={ics206} setIcs206={setIcs206}
                   logs={logs} setLogs={setLogs}
+                  objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset}
                 />
               )}
             </>
