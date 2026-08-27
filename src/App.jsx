@@ -2899,6 +2899,43 @@ function AppInner({ onLock }) {
     setIcs206(v => ({ ...v, opTo: combinedTo }));
   }, [incident.dateInitiated, incident.dateTerminated, incident.timeTerminated, ready, incidentLoaded]);
 
+  // Keep ICS-201's Block 10 Resource Summary in sync with the Resource
+  // Board: every checked-in resource gets (or keeps updated) a matching
+  // row — Resource Identifier from its unit ID, Arrived always checked
+  // with the check-in time standing in for arrival time, and Notes
+  // reflecting its current assignment. Rows are matched by
+  // sourceResourceId so a resource's row keeps updating as its
+  // assignment changes, without disturbing any row someone added by
+  // hand for something ordered but not yet on the board (those don't
+  // have a sourceResourceId, so this loop never touches them). Existing
+  // rows are updated in place rather than removed if a resource later
+  // leaves the board, since an arrival record shouldn't disappear.
+  useEffect(() => {
+    if (!ready || !incidentLoaded) return;
+    setIncident(inc => {
+      const bySource = new Map(inc.resourceOrders.filter(r => r.sourceResourceId).map(r => [r.sourceResourceId, r]));
+      let changed = false;
+      const nextOrders = [...inc.resourceOrders];
+      resources.forEach(r => {
+        const arrivedTime = r.checkIn ? new Date(r.checkIn).toTimeString().slice(0, 5) : "";
+        const existing = bySource.get(r.id);
+        const synced = { resource: r.kind, identifier: r.label, eta: arrivedTime, arrived: true, notes: r.assignment || "", sourceResourceId: r.id };
+        if (existing) {
+          const idx = nextOrders.findIndex(o => o.id === existing.id);
+          const updated = { ...existing, ...synced };
+          if (updated.resource !== existing.resource || updated.identifier !== existing.identifier || updated.eta !== existing.eta || updated.arrived !== existing.arrived || updated.notes !== existing.notes) {
+            nextOrders[idx] = updated;
+            changed = true;
+          }
+        } else {
+          nextOrders.push({ id: uid(), ordered: "", ...synced });
+          changed = true;
+        }
+      });
+      return changed ? { ...inc, resourceOrders: nextOrders } : inc;
+    });
+  }, [resources, ready, incidentLoaded]);
+
   const saveUnitPreset = async (unit) => {
     if (!unit || presets.units.includes(unit)) return;
     const next = { ...presets, units: [...presets.units, unit] };
