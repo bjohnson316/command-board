@@ -166,7 +166,7 @@ function defaultIcs209() {
   return {
     reportVersion: "Initial", reportNumber: "",
     icAgency: "", imTeam: "",
-    startDate: "", startTime: "", startTimeZone: "",
+    startDate: "", startTime: "", startTimeZone: "CST",
     sizeArea: "", percentContained: "",
     definition: "", complexityLevel: "",
     opFrom: "", opTo: "",
@@ -1060,9 +1060,9 @@ function Tab209({ ics209, setIcs209, incident }) {
           <Field label="Incident Management Organization"><TextInput value={ics209.imTeam} onChange={e => set({ imTeam: e.target.value })} placeholder="Type 1/2/3 IMT, Unified Command..." /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
-          <Field label="Incident Start Date"><TextInput type="date" value={ics209.startDate} onChange={e => set({ startDate: e.target.value })} /></Field>
-          <Field label="Start Time"><TextInput type="time" value={ics209.startTime} onChange={e => set({ startTime: e.target.value })} /></Field>
-          <Field label="Time Zone"><TextInput value={ics209.startTimeZone} onChange={e => set({ startTimeZone: e.target.value })} placeholder="EDT, PST..." /></Field>
+          <Field label="Incident Start Date"><TextInput type="date" value={incident.dateInitiated} disabled style={{ opacity: 0.65 }} /></Field>
+          <Field label="Start Time"><TextInput type="time" value={incident.timeInitiated} disabled style={{ opacity: 0.65 }} /></Field>
+          <Field label="Time Zone"><TextInput value="CST" disabled style={{ opacity: 0.65 }} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
           <Field label="Current Size/Area Involved"><TextInput value={ics209.sizeArea} onChange={e => set({ sizeArea: e.target.value })} placeholder="sq mi, acres..." /></Field>
@@ -1996,6 +1996,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 
   if (include("209")) {
     heading(L, "ICS-209 · Incident Status Summary");
+    push(`Incident Start: ${incident.dateInitiated || "-"} ${incident.timeInitiated || "-"} CST`, "H", 9);
     push(`Report Version: ${ics209.reportVersion || "-"}   Prepared: ${ics209.preparedDateTime || "-"}   For Period: ${ics209.opFrom || "-"} to ${ics209.opTo || "-"}`, "H", 9);
     push(`IC/Agency: ${ics209.icAgency || "-"}   Size/Area: ${ics209.sizeArea || "-"}   % Contained: ${ics209.percentContained || "-"}`, "H", 9);
     push(`Definition: ${ics209.definition || "-"}   Complexity: ${ics209.complexityLevel || "-"}`, "H", 9);
