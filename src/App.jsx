@@ -2290,9 +2290,71 @@ function ChangeArchivePasswordModal({ onClose }) {
   );
 }
 
+// Generic password gate for a destructive/protected action — checks
+// against the same archivePinHash used to view archived incidents,
+// rather than a separate credential. If no archive password has ever
+// been set, the action can't be confirmed (nothing to check against)
+// rather than silently allowing it through unprotected.
+function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
+  const [phase, setPhase] = useState("loading"); // loading | notSet | prompt
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const cfg = await loadPinConfig();
+      setPhase(cfg && cfg.archivePinHash ? "prompt" : "notSet");
+    })();
+  }, []);
+
+  const submit = async () => {
+    setError("");
+    setChecking(true);
+    const cfg = await loadPinConfig();
+    const hash = await sha256(pin);
+    setChecking(false);
+    if (cfg && cfg.archivePinHash && hash === cfg.archivePinHash) {
+      onConfirm();
+    } else {
+      setError("Incorrect archive password.");
+      setPin("");
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>{title}</span>
+          <button onClick={onCancel} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        {phase === "loading" && <div style={{ color: COLORS.muted, fontSize: 13 }}>Loading…</div>}
+        {phase === "notSet" && (
+          <div style={{ fontSize: 12.5, color: COLORS.muted, lineHeight: 1.5 }}>
+            No archive password has been set yet, so this action can't be confirmed. Set one first from "View Archived Incidents" in the library.
+          </div>
+        )}
+        {phase === "prompt" && (
+          <>
+            <p style={{ fontSize: 12.5, color: COLORS.muted, marginTop: 0, lineHeight: 1.5 }}>{message}</p>
+            <TextInput type="password" autoFocus placeholder="Archive password" value={pin} onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
+              onKeyDown={e => e.key === "Enter" && submit()} />
+            <Btn kind="solid" onClick={submit} disabled={checking} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
+              {checking ? "Checking…" : "Confirm"}
+            </Btn>
+            {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOpenArchive, mandatory }) {
   const active = index.filter(i => !i.archived);
   const archivedCount = index.length - active.length;
+  const [confirmAction, setConfirmAction] = useState(null); // { type: "archive" | "delete", id, name }
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 480, maxHeight: "80vh", overflow: "auto" }}>
@@ -2324,8 +2386,8 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <Btn kind="subtle" onClick={() => onLoad(item.id)} style={{ padding: "5px 9px", fontSize: 12 }}>Open</Btn>
-                  <Btn kind="ghost" onClick={() => onArchive(item.id)} title="Archive" style={{ padding: "5px 9px", fontSize: 12 }}><Archive size={13} /></Btn>
-                  <Btn kind="danger" onClick={() => onDelete(item.id)} style={{ padding: "5px 9px", fontSize: 12 }}><Trash2 size={13} /></Btn>
+                  <Btn kind="ghost" onClick={() => setConfirmAction({ type: "archive", id: item.id, name: item.name })} title="Archive" style={{ padding: "5px 9px", fontSize: 12 }}><Archive size={13} /></Btn>
+                  <Btn kind="danger" onClick={() => setConfirmAction({ type: "delete", id: item.id, name: item.name })} style={{ padding: "5px 9px", fontSize: 12 }}><Trash2 size={13} /></Btn>
                 </div>
               </div>
             ))}
@@ -2337,6 +2399,22 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
           </div>
         </div>
       </div>
+
+      {confirmAction && (
+        <PasswordConfirmModal
+          title={confirmAction.type === "archive" ? "Confirm Archive" : "Confirm Delete"}
+          message={
+            confirmAction.type === "archive"
+              ? `Enter the archive password to archive "${confirmAction.name || "Unnamed Incident"}".`
+              : `Enter the archive password to permanently delete "${confirmAction.name || "Unnamed Incident"}". This can't be undone.`
+          }
+          onConfirm={() => {
+            (confirmAction.type === "archive" ? onArchive : onDelete)(confirmAction.id);
+            setConfirmAction(null);
+          }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
     </div>
   );
 }
