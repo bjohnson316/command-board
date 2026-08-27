@@ -6,7 +6,7 @@ import {
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound
 } from "lucide-react";
 import {
-  loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
+  loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
   deleteIncidentBlob, watchIncident, loadPinConfig, savePinConfig,
   loadPresets, savePresets,
   loadAttachments, saveAttachment, deleteAttachment, deleteAllAttachments,
@@ -2836,6 +2836,16 @@ function AppInner({ onLock }) {
   const saveTimer = useRef(null);
   const lastKnownUpdatedAt = useRef(null);
   const dirty = useRef(false); // true while a local edit hasn't been written to shared storage yet
+  // Set to true by applyBlob() every time it's called to LOAD data (opening
+  // an incident, starting new, or receiving a real-time update from
+  // another device) — never for a genuine local edit. The autosave effect
+  // checks this and skips the very next save cycle when it's set. Without
+  // this, simply opening an incident re-saves whatever was just loaded
+  // back to Firestore (because `incidentLoaded` is one of autosave's
+  // dependencies), which silently overwrites newer data with an older
+  // cached copy on any device that hadn't synced recently — the exact
+  // failure mode that caused entered data to be wiped out.
+  const suppressNextAutosave = useRef(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -2909,6 +2919,10 @@ function AppInner({ onLock }) {
   };
 
   function applyBlob(blob, markSynced = true) {
+    // This function only ever LOADS data into state — it's never used
+    // for an individual field edit — so every call means "the next
+    // autosave cycle is not a real edit, skip it."
+    suppressNextAutosave.current = true;
     setIncident(normalizeIncident(blob.incident));
     setResources(blob.resources || []);
     setOrg(blob.org || { positions: {}, divisions: [] });
@@ -2933,6 +2947,16 @@ function AppInner({ onLock }) {
   // autosave (debounced) whenever data changes, after initial load
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
+    // This render cycle is the result of a LOAD (open/new/incoming
+    // real-time update), not a real edit — skip saving. Critical: without
+    // this, opening an incident immediately re-saves whatever was just
+    // read straight back to Firestore (since incidentLoaded is a
+    // dependency below), which can silently overwrite newer data on the
+    // server with an older copy if this device's read was stale.
+    if (suppressNextAutosave.current) {
+      suppressNextAutosave.current = false;
+      return;
+    }
     dirty.current = true;
     setSaveState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -2973,7 +2997,10 @@ function AppInner({ onLock }) {
     setShowLib(false);
   };
   const openIncident = async (id) => {
-    const blob = await loadIncidentBlob(id);
+    // Deliberately bypasses Firestore's local cache — see the comment on
+    // loadIncidentBlobFresh for why this matters (a stale cached read
+    // here is exactly what caused entered data to get overwritten).
+    const blob = await loadIncidentBlobFresh(id);
     if (blob) applyBlob(blob);
     const atts = await loadAttachments(id);
     setAttachments(atts);
@@ -3016,7 +3043,7 @@ function AppInner({ onLock }) {
     await saveIndex(nextIndex);
   };
   const exportArchivedIncident = async (id) => {
-    const blob = await loadIncidentBlob(id);
+    const blob = await loadIncidentBlobFresh(id);
     if (blob) {
       const atts = await loadAttachments(id);
       await downloadPacketPdf({ ...blob, attachments: atts });

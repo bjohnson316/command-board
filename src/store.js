@@ -1,6 +1,6 @@
 import { db } from "./firebase";
 import {
-  doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp,
+  doc, getDoc, getDocFromServer, setDoc, deleteDoc, onSnapshot, serverTimestamp,
   collection, getDocs,
 } from "firebase/firestore";
 
@@ -35,6 +35,26 @@ export async function loadIncidentBlob(id) {
     return snap.exists() ? snap.data() : null;
   } catch {
     return null;
+  }
+}
+
+// Used specifically when a device explicitly opens an incident — bypasses
+// Firestore's local cache and forces a real read from the server. This
+// matters because offline persistence (needed for the app to work with
+// no signal) means a device can be holding a stale cached copy of an
+// incident from before other devices made changes to it; opening an
+// incident is the one moment a device is about to start editing on top
+// of whatever it reads, so that read must be the true latest version,
+// not a locally-cached one, or genuine edits end up overwriting other
+// people's newer work with a merge onto stale data. Falls back to the
+// normal cache-aware read if there's no connectivity, since offline use
+// still needs to work — that's the one case a stale read is unavoidable.
+export async function loadIncidentBlobFresh(id) {
+  try {
+    const snap = await getDocFromServer(doc(db, "icIncidents", id));
+    return snap.exists() ? snap.data() : null;
+  } catch {
+    return loadIncidentBlob(id);
   }
 }
 
