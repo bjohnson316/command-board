@@ -110,6 +110,10 @@ function blankIncident() {
     actionsLog: [],
     resourceOrders: [],
     mapSketch: "",
+    strategyOffensive: false,
+    strategyDefensive: false,
+    strategyTransitional: false,
+    strategyInvestigative: false,
   };
 }
 
@@ -129,6 +133,7 @@ function normalizeIncident(inc) {
     prepPosition: "", prepSignature: "", prepDateTime: "",
     dateInitiated: "", timeInitiated: "", timeTerminated: "", dateTerminated: "",
     actionsLog: [], resourceOrders: [], mapSketch: "",
+    strategyOffensive: false, strategyDefensive: false, strategyTransitional: false, strategyInvestigative: false,
     pausedElapsedMs: 0,
     ...migrated,
   };
@@ -388,6 +393,14 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 
         <div style={{ marginTop: 16 }}>
           <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>Current and Planned Actions, Strategies, and Tactics</div>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 12 }}>
+            {[["strategyOffensive", "Offensive"], ["strategyDefensive", "Defensive"], ["strategyTransitional", "Transitional"], ["strategyInvestigative", "Investigative"]].map(([key, label]) => (
+              <label key={key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>
+                <input type="checkbox" checked={incident[key]} onChange={e => setIncident({ ...incident, [key]: e.target.checked })} style={{ width: 16, height: 16 }} />
+                {label}
+              </label>
+            ))}
+          </div>
           {incident.actionsLog.map(a => (
             <div key={a.id} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
               <TextInput type="time" value={a.time} onChange={e => updateAction(a.id, { time: e.target.value })} style={{ width: 130 }} />
@@ -1950,6 +1963,9 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     else objs.forEach((o, i) => wrapPush(L, `${i + 1}. ${o}`));
     blank();
     push("Current and Planned Actions, Strategies, and Tactics:", "HB", 9);
+    const strategyLabels = [["strategyOffensive", "Offensive"], ["strategyDefensive", "Defensive"], ["strategyTransitional", "Transitional"], ["strategyInvestigative", "Investigative"]]
+      .filter(([key]) => incident[key]).map(([, label]) => label);
+    push(`Strategy: ${strategyLabels.length ? strategyLabels.join(", ") : "(none checked)"}`, "H", 9);
     const actionsWithText = (incident.actionsLog || []).filter(a => a.time || a.actions);
     if (actionsWithText.length === 0) push("(none entered)");
     else actionsWithText.forEach(a => wrapPush(L, `${a.time || "-"}: ${a.actions}`));
