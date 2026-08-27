@@ -1510,14 +1510,33 @@ const ICS_FORM_OPTIONS = [
 
 function TabICSForms(props) {
   const [selected, setSelected] = useState("201full");
+  const { formsUsed, toggleFormUsed } = props;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>Select Form</span>
-        <Select value={selected} onChange={e => setSelected(e.target.value)} style={{ maxWidth: 360, fontSize: 13 }}>
-          {ICS_FORM_OPTIONS.map(o => <option key={o.k} value={o.k}>{o.label}</option>)}
-        </Select>
-      </div>
+      <Panel title="Forms in Use" icon={CheckCircle2}>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
+          Check the forms this incident is actually using — only checked forms are included in the Print/Export report. Click a form's name to open and edit it below.
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {ICS_FORM_OPTIONS.map(o => {
+            const isSelected = selected === o.k;
+            const isUsed = !!formsUsed[o.k];
+            return (
+              <div key={o.k} style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "7px 11px", borderRadius: 5,
+                background: isSelected ? COLORS.panel2 : "transparent",
+                border: `1px solid ${isSelected ? COLORS.amber : COLORS.line}`,
+              }}>
+                <input type="checkbox" checked={isUsed} onChange={() => toggleFormUsed(o.k)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+                <span onClick={() => setSelected(o.k)} style={{ fontSize: 12.5, cursor: "pointer", color: isUsed ? COLORS.text : COLORS.muted, whiteSpace: "nowrap" }}>
+                  {o.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
       {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivePresets={props.objectivePresets} onSavePreset={props.onSavePreset} />}
       {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} incident={props.incident} />}
       {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
@@ -1734,7 +1753,7 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -1749,6 +1768,11 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   ics209 = { ...defaultIcs209(), ...(ics209 || {}) };
   ics206 = { ...defaultIcs206(), ...(ics206 || {}) };
   logs = logs || [];
+  // Older saved incidents (or a first export before any form was
+  // checked) won't have this — fall back to "everything included"
+  // rather than silently producing an empty packet.
+  const used = formsUsed && Object.keys(formsUsed).length > 0 ? formsUsed : null;
+  const include = (key) => !used || !!used[key];
   const L = [];
   const push = (text, font = "H", size = 9) => L.push({ kind: "text", text, font, size });
   const blank = () => push("");
@@ -1762,25 +1786,28 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 
   heading(L, "ICS-201 · Incident Briefing");
   push(`Date/Time Initiated: ${incident.dateInitiated || "-"} ${incident.timeInitiated || ""}`, "H", 9);
-  push("Situation Summary and Health/Safety Briefing:", "HB", 9);
-  wrapPush(L, incident.situation);
-  blank();
-  push("Objectives:", "HB", 9);
-  const objs = incident.objectives.filter(Boolean);
-  if (objs.length === 0) push("(none entered)");
-  else objs.forEach((o, i) => wrapPush(L, `${i + 1}. ${o}`));
-  blank();
-  push("Current and Planned Actions, Strategies, and Tactics:", "HB", 9);
-  const actionsWithText = (incident.actionsLog || []).filter(a => a.time || a.actions);
-  if (actionsWithText.length === 0) push("(none entered)");
-  else actionsWithText.forEach(a => wrapPush(L, `${a.time || "-"}: ${a.actions}`));
-  blank();
-  push(`Prepared By: ${incident.preparedBy || "-"}   Position: ${incident.prepPosition || "-"}`, "H", 9);
-  push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
-  blank();
+  if (include("201full")) {
+    heading(L, "ICS-201 · Incident Briefing");
+    push("Situation Summary and Health/Safety Briefing:", "HB", 9);
+    wrapPush(L, incident.situation);
+    blank();
+    push("Objectives:", "HB", 9);
+    const objs = incident.objectives.filter(Boolean);
+    if (objs.length === 0) push("(none entered)");
+    else objs.forEach((o, i) => wrapPush(L, `${i + 1}. ${o}`));
+    blank();
+    push("Current and Planned Actions, Strategies, and Tactics:", "HB", 9);
+    const actionsWithText = (incident.actionsLog || []).filter(a => a.time || a.actions);
+    if (actionsWithText.length === 0) push("(none entered)");
+    else actionsWithText.forEach(a => wrapPush(L, `${a.time || "-"}: ${a.actions}`));
+    blank();
+    push(`Prepared By: ${incident.preparedBy || "-"}   Position: ${incident.prepPosition || "-"}`, "H", 9);
+    push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
+    blank();
 
-  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
-    (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary (Ordered)"));
+    L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
+      (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary (Ordered)"));
+  }
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status (not on official form)"));
@@ -1794,91 +1821,104 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   else orgLines.forEach(l => wrapPush(L, l));
   blank();
 
-  heading(L, "ICS-205 · Incident Radio Communications Plan");
-  push(`Date/Time Prepared: ${comms.dateTimePrepared || "-"}   Operational Period: ${comms.opFrom || "-"} to ${comms.opTo || "-"}`, "H", 9);
-  blank();
-  L.push(...tableLines(["ZN/GRP", "CH#", "FUNCTION", "CHANNEL NAME", "ASSIGN", "RX FREQ", "TX FREQ", "MODE", "REMARKS"], [40, 30, 65, 90, 60, 65, 65, 35, 80],
-    comms.rows.map(c => [c.zoneGroup, c.chNum, c.func, c.channelName, c.assignment, c.rxFreq, c.txFreq, c.mode, c.remarks])));
-  if (comms.specialInstructions) {
-    push("Special Instructions:", "HB", 9);
-    wrapPush(L, comms.specialInstructions);
+  if (include("205")) {
+    heading(L, "ICS-205 · Incident Radio Communications Plan");
+    push(`Date/Time Prepared: ${comms.dateTimePrepared || "-"}   Operational Period: ${comms.opFrom || "-"} to ${comms.opTo || "-"}`, "H", 9);
+    blank();
+    L.push(...tableLines(["ZN/GRP", "CH#", "FUNCTION", "CHANNEL NAME", "ASSIGN", "RX FREQ", "TX FREQ", "MODE", "REMARKS"], [40, 30, 65, 90, 60, 65, 65, 35, 80],
+      comms.rows.map(c => [c.zoneGroup, c.chNum, c.func, c.channelName, c.assignment, c.rxFreq, c.txFreq, c.mode, c.remarks])));
+    if (comms.specialInstructions) {
+      push("Special Instructions:", "HB", 9);
+      wrapPush(L, comms.specialInstructions);
+    }
+    push(`Prepared By (Comms Unit Leader): ${comms.preparedBy || "-"}   Signature: ${comms.signature || "-"}   Date/Time: ${comms.dateTime || "-"}`, "H", 9);
+    blank();
   }
-  push(`Prepared By (Comms Unit Leader): ${comms.preparedBy || "-"}   Signature: ${comms.signature || "-"}   Date/Time: ${comms.dateTime || "-"}`, "H", 9);
-  blank();
 
-  heading(L, "ICS-215A · Incident Action Plan Safety Analysis");
-  push(`Operational Period: ${safety.opFrom || "-"} to ${safety.opTo || "-"}`, "H", 9);
-  blank();
-  L.push(...tableLines(["BRANCH", "DIV/GRP", "HAZARDS", "MITIGATIONS"], [60, 70, 175, 175],
-    safety.rows.map(r => [r.branch, r.division, r.hazards, r.mitigations])));
-  push(`Prepared By: ${safety.preparedBy || "-"}   Position: ${safety.position || "-"}`);
-  push(`Signature: ${safety.signature || "-"}   Date/Time: ${safety.dateTime || "-"}`);
-  blank();
+  if (include("215a")) {
+    heading(L, "ICS-215A · Incident Action Plan Safety Analysis");
+    push(`Operational Period: ${safety.opFrom || "-"} to ${safety.opTo || "-"}`, "H", 9);
+    blank();
+    L.push(...tableLines(["BRANCH", "DIV/GRP", "HAZARDS", "MITIGATIONS"], [60, 70, 175, 175],
+      safety.rows.map(r => [r.branch, r.division, r.hazards, r.mitigations])));
+    push(`Prepared By: ${safety.preparedBy || "-"}   Position: ${safety.position || "-"}`);
+    push(`Signature: ${safety.signature || "-"}   Date/Time: ${safety.dateTime || "-"}`);
+    blank();
+  }
 
-  heading(L, "ICS-208 · Safety Message/Plan");
-  push(`Operational Period: ${ics208.opFrom || "-"} to ${ics208.opTo || "-"}`, "H", 9);
-  blank();
-  wrapPush(L, ics208.message || "(none entered)");
-  push(`Site Safety Plan Required: ${ics208.siteSafetyPlanRequired || "-"}   Located At: ${ics208.siteSafetyPlanLocation || "-"}`, "H", 9);
-  push(`Prepared By: ${ics208.preparedBy || "-"}   Position: ${ics208.position || "-"}`);
-  push(`Signature: ${ics208.signature || "-"}   Date/Time: ${ics208.dateTime || "-"}`);
-  blank();
+  if (include("208")) {
+    heading(L, "ICS-208 · Safety Message/Plan");
+    push(`Operational Period: ${ics208.opFrom || "-"} to ${ics208.opTo || "-"}`, "H", 9);
+    blank();
+    wrapPush(L, ics208.message || "(none entered)");
+    push(`Site Safety Plan Required: ${ics208.siteSafetyPlanRequired || "-"}   Located At: ${ics208.siteSafetyPlanLocation || "-"}`, "H", 9);
+    push(`Prepared By: ${ics208.preparedBy || "-"}   Position: ${ics208.position || "-"}`);
+    push(`Signature: ${ics208.signature || "-"}   Date/Time: ${ics208.dateTime || "-"}`);
+    blank();
+  }
 
-  heading(L, "ICS-208 HM · Site Safety and Control Plan");
-  push(`Incident Location: ${ics208hm.incidentLocation || "-"}   Date Prepared: ${ics208hm.dateTime || "-"}`, "H", 9);
-  push(`Op Period: ${ics208hm.opFrom || "-"} to ${ics208hm.opTo || "-"}`, "H", 9);
-  push("Organization:", "HB", 9);
-  push(`IC: ${ics208hm.orgIC || "-"}   HM Group Supv: ${ics208hm.orgHMGroupSupervisor || "-"}   Safety Officer: ${ics208hm.orgSafetyOfficer || "-"}`, "H", 9);
-  push(`Entry Leader: ${ics208hm.orgEntryLeader || "-"}   Decon Leader: ${ics208hm.orgDeconLeader || "-"}   Site Access Control: ${ics208hm.orgSiteAccessControlLeader || "-"}`, "H", 9);
-  L.push(...tableLines(["ENTRY MEMBER", "NAME", "PPE LEVEL"], [90, 150, 90],
-    (ics208hm.entryTeam || []).map(m => [m.label, m.name, m.ppeLevel])));
-  L.push(...tableLines(["DECON MEMBER", "NAME", "PPE LEVEL"], [90, 150, 90],
-    (ics208hm.deconTeam || []).map(m => [m.label, m.name, m.ppeLevel])));
-  L.push(...tableLines(["MATERIAL", "CONTAINER", "QTY", "IDLH", "LEL", "UEL"], [90, 80, 50, 60, 50, 50],
-    (ics208hm.materials || []).map(m => [m.material, m.containerType, m.qty, m.idlh, m.lel, m.uel]), "Hazard/Risk Analysis"));
-  push(`Monitoring — LEL: ${ics208hm.lelInstruments || "-"}   O2: ${ics208hm.o2Instruments || "-"}   Toxicity: ${ics208hm.toxicityInstruments || "-"}   Radiological: ${ics208hm.radiologicalInstruments || "-"}`, "H", 9);
-  push(`Standard Decon Procedures: ${ics208hm.standardDecon || "-"}   ${ics208hm.deconComment || ""}`, "H", 9);
-  push(`Comms — Command: ${ics208hm.commandFreq || "-"}   Tactical: ${ics208hm.tacticalFreq || "-"}   Entry: ${ics208hm.entryFreq || "-"}`, "H", 9);
-  push(`Medical Monitoring: ${ics208hm.medicalMonitoring || "-"}   Treatment In-Place: ${ics208hm.medicalTreatmentInPlace || "-"}`, "H", 9);
-  push("Entry Objectives:", "HB", 9);
-  wrapPush(L, ics208hm.entryObjectives || "(none entered)");
-  push("Emergency Procedures:", "HB", 9);
-  wrapPush(L, ics208hm.emergencyProcedures || "(none entered)");
-  push(`Safety Briefing — Asst. Safety Officer HM: ${ics208hm.asstSafetyOfficerSignature || "-"} (${ics208hm.safetyBriefingTime || "-"})`, "H", 9);
-  push(`HM Group Supervisor: ${ics208hm.hmGroupSupervisorSignature || "-"}   Incident Commander: ${ics208hm.incidentCommanderSignature || "-"}`, "H", 9);
-  blank();
+  if (include("208hm")) {
+    heading(L, "ICS-208 HM · Site Safety and Control Plan");
+    push(`Incident Location: ${ics208hm.incidentLocation || "-"}   Date Prepared: ${ics208hm.dateTime || "-"}`, "H", 9);
+    push(`Op Period: ${ics208hm.opFrom || "-"} to ${ics208hm.opTo || "-"}`, "H", 9);
+    push("Organization:", "HB", 9);
+    push(`IC: ${ics208hm.orgIC || "-"}   HM Group Supv: ${ics208hm.orgHMGroupSupervisor || "-"}   Safety Officer: ${ics208hm.orgSafetyOfficer || "-"}`, "H", 9);
+    push(`Entry Leader: ${ics208hm.orgEntryLeader || "-"}   Decon Leader: ${ics208hm.orgDeconLeader || "-"}   Site Access Control: ${ics208hm.orgSiteAccessControlLeader || "-"}`, "H", 9);
+    L.push(...tableLines(["ENTRY MEMBER", "NAME", "PPE LEVEL"], [90, 150, 90],
+      (ics208hm.entryTeam || []).map(m => [m.label, m.name, m.ppeLevel])));
+    L.push(...tableLines(["DECON MEMBER", "NAME", "PPE LEVEL"], [90, 150, 90],
+      (ics208hm.deconTeam || []).map(m => [m.label, m.name, m.ppeLevel])));
+    L.push(...tableLines(["MATERIAL", "CONTAINER", "QTY", "IDLH", "LEL", "UEL"], [90, 80, 50, 60, 50, 50],
+      (ics208hm.materials || []).map(m => [m.material, m.containerType, m.qty, m.idlh, m.lel, m.uel]), "Hazard/Risk Analysis"));
+    push(`Monitoring — LEL: ${ics208hm.lelInstruments || "-"}   O2: ${ics208hm.o2Instruments || "-"}   Toxicity: ${ics208hm.toxicityInstruments || "-"}   Radiological: ${ics208hm.radiologicalInstruments || "-"}`, "H", 9);
+    push(`Standard Decon Procedures: ${ics208hm.standardDecon || "-"}   ${ics208hm.deconComment || ""}`, "H", 9);
+    push(`Comms — Command: ${ics208hm.commandFreq || "-"}   Tactical: ${ics208hm.tacticalFreq || "-"}   Entry: ${ics208hm.entryFreq || "-"}`, "H", 9);
+    push(`Medical Monitoring: ${ics208hm.medicalMonitoring || "-"}   Treatment In-Place: ${ics208hm.medicalTreatmentInPlace || "-"}`, "H", 9);
+    push("Entry Objectives:", "HB", 9);
+    wrapPush(L, ics208hm.entryObjectives || "(none entered)");
+    push("Emergency Procedures:", "HB", 9);
+    wrapPush(L, ics208hm.emergencyProcedures || "(none entered)");
+    push(`Safety Briefing — Asst. Safety Officer HM: ${ics208hm.asstSafetyOfficerSignature || "-"} (${ics208hm.safetyBriefingTime || "-"})`, "H", 9);
+    push(`HM Group Supervisor: ${ics208hm.hmGroupSupervisorSignature || "-"}   Incident Commander: ${ics208hm.incidentCommanderSignature || "-"}`, "H", 9);
+    blank();
+  }
 
-  heading(L, "ICS-209 · Incident Status Summary");
-  push(`Report Version: ${ics209.reportVersion || "-"}   Prepared: ${ics209.preparedDateTime || "-"}   For Period: ${ics209.opFrom || "-"} to ${ics209.opTo || "-"}`, "H", 9);
-  push(`IC/Agency: ${ics209.icAgency || "-"}   Size/Area: ${ics209.sizeArea || "-"}   % Contained: ${ics209.percentContained || "-"}`, "H", 9);
-  push(`Definition: ${ics209.definition || "-"}   Complexity: ${ics209.complexityLevel || "-"}`, "H", 9);
-  push(`Location: ${ics209.shortLocation || "-"}`, "H", 9);
-  push("Significant Events:", "HB", 9);
-  wrapPush(L, ics209.significantEvents || "(none entered)");
-  push(`Primary Materials/Hazards: ${ics209.primaryMaterials || "-"}`, "H", 9);
-  const activeThreatFlags = THREAT_FLAG_OPTIONS.filter(([k]) => ics209.threatFlags[k]).map(([, l]) => l);
-  push(`Threat Management: ${activeThreatFlags.length ? activeThreatFlags.join(", ") : "(none checked)"}`, "H", 9);
-  push(`Weather Concerns: ${ics209.weatherConcerns || "-"}`, "H", 9);
-  push("Strategic Objectives:", "HB", 9);
-  wrapPush(L, ics209.strategicObjectives || "(none entered)");
-  push("Planned Actions Next Op Period:", "HB", 9);
-  wrapPush(L, ics209.plannedActions || "(none entered)");
-  push(`Prepared By: ${ics209.preparedByName || "-"} (${ics209.preparedByPosition || "-"})   Approved By: ${ics209.approvedByName || "-"}`, "H", 9);
-  blank();
+  if (include("209")) {
+    heading(L, "ICS-209 · Incident Status Summary");
+    push(`Report Version: ${ics209.reportVersion || "-"}   Prepared: ${ics209.preparedDateTime || "-"}   For Period: ${ics209.opFrom || "-"} to ${ics209.opTo || "-"}`, "H", 9);
+    push(`IC/Agency: ${ics209.icAgency || "-"}   Size/Area: ${ics209.sizeArea || "-"}   % Contained: ${ics209.percentContained || "-"}`, "H", 9);
+    push(`Definition: ${ics209.definition || "-"}   Complexity: ${ics209.complexityLevel || "-"}`, "H", 9);
+    push(`Location: ${ics209.shortLocation || "-"}`, "H", 9);
+    push("Significant Events:", "HB", 9);
+    wrapPush(L, ics209.significantEvents || "(none entered)");
+    push(`Primary Materials/Hazards: ${ics209.primaryMaterials || "-"}`, "H", 9);
+    const activeThreatFlags = THREAT_FLAG_OPTIONS.filter(([k]) => ics209.threatFlags[k]).map(([, l]) => l);
+    push(`Threat Management: ${activeThreatFlags.length ? activeThreatFlags.join(", ") : "(none checked)"}`, "H", 9);
+    push(`Weather Concerns: ${ics209.weatherConcerns || "-"}`, "H", 9);
+    push("Strategic Objectives:", "HB", 9);
+    wrapPush(L, ics209.strategicObjectives || "(none entered)");
+    push("Planned Actions Next Op Period:", "HB", 9);
+    wrapPush(L, ics209.plannedActions || "(none entered)");
+    push(`Prepared By: ${ics209.preparedByName || "-"} (${ics209.preparedByPosition || "-"})   Approved By: ${ics209.approvedByName || "-"}`, "H", 9);
+    blank();
+  }
 
-  heading(L, "ICS-206 · Medical Plan");
-  L.push(...tableLines(["STATION", "LOCATION", "CONTACT", "PARAMEDIC"], [110, 150, 150, 90],
-    ics206.aidStations.map(r => [r.name, r.location, r.contact, r.paramedic]), "Medical Aid Stations"));
-  L.push(...tableLines(["SERVICE", "LOCATION", "CONTACT", "LEVEL"], [130, 130, 130, 80],
-    ics206.ambulances.map(r => [r.name, r.location, r.contact, r.level]), "Ambulance Services"));
-  L.push(...tableLines(["HOSPITAL", "ADDRESS", "TRAVEL AIR", "TRAVEL GRND", "TRAUMA", "BURN", "HELIPAD"], [100, 140, 65, 70, 60, 50, 60],
-    ics206.hospitals.map(r => [r.name, r.address, r.travelAir, r.travelGround, r.trauma === "Yes" ? `Yes (${r.traumaLevel || "?"})` : "No", r.burn, r.helipad]), "Hospitals"));
-  push(`Aviation Assets Utilized for Rescue: ${ics206.aviationAssets ? "Yes" : "No"}`, "H", 9);
+  if (include("206")) {
+    heading(L, "ICS-206 · Medical Plan");
+    L.push(...tableLines(["STATION", "LOCATION", "CONTACT", "PARAMEDIC"], [110, 150, 150, 90],
+      ics206.aidStations.map(r => [r.name, r.location, r.contact, r.paramedic]), "Medical Aid Stations"));
+    L.push(...tableLines(["SERVICE", "LOCATION", "CONTACT", "LEVEL"], [130, 130, 130, 80],
+      ics206.ambulances.map(r => [r.name, r.location, r.contact, r.level]), "Ambulance Services"));
+    L.push(...tableLines(["HOSPITAL", "ADDRESS", "TRAVEL AIR", "TRAVEL GRND", "TRAUMA", "BURN", "HELIPAD"], [100, 140, 65, 70, 60, 50, 60],
+      ics206.hospitals.map(r => [r.name, r.address, r.travelAir, r.travelGround, r.trauma === "Yes" ? `Yes (${r.traumaLevel || "?"})` : "No", r.burn, r.helipad]), "Hospitals"));
+    push(`Aviation Assets Utilized for Rescue: ${ics206.aviationAssets ? "Yes" : "No"}`, "H", 9);
   push("Special Medical Emergency Procedures:", "HB", 9);
   wrapPush(L, ics206.procedures || "(none entered)");
   push(`Prepared By: ${ics206.preparedBy || "-"}   Approved By (Safety Officer): ${ics206.approvedBy || "-"}`);
   blank();
+  }
 
+  if (include("214")) {
   heading(L, "ICS-214 · Activity Logs");
   if (logs.length === 0) {
     push("(none entered)");
@@ -1888,6 +1928,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
       L.push(...tableLines(["TIME", "ACTIVITY"], [60, 440],
         l.entries.slice().sort((a, b) => new Date(a.time) - new Date(b.time)).map(e => [fmtTime(e.time), e.text])));
     });
+  }
   }
   return L;
 }
@@ -2476,6 +2517,8 @@ function AppInner({ onLock }) {
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
   const [presets, setPresets] = useState({ units: [], objectives: [] });
+  const [formsUsed, setFormsUsed] = useState({});
+  const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
   const [incidentLoaded, setIncidentLoaded] = useState(false);
   const [index, setIndex] = useState([]);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
@@ -2542,6 +2585,7 @@ function AppInner({ onLock }) {
     setIcs208hm({ ...defaultIcs208HM(), ...(blob.ics208hm || {}) });
     setIcs209({ ...defaultIcs209(), ...(blob.ics209 || {}) });
     setIcs206({ ...defaultIcs206(), ...(blob.ics206 || {}) });
+    setFormsUsed(blob.formsUsed || {});
     setRehab(blob.rehab || []);
     setLogs(blob.logs || []);
     if (markSynced) lastKnownUpdatedAt.current = blob.updatedAt || null;
@@ -2555,7 +2599,7 @@ function AppInner({ onLock }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const updatedAt = nowISO();
-      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, updatedAt };
+      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, updatedAt };
       const ok = await saveIncidentBlob(incident.id, blob);
       const meta = { id: incident.id, name: incident.name, type: incident.type, savedAt: updatedAt };
       const nextIndex = [meta, ...index.filter(i => i.id !== incident.id)];
@@ -2567,7 +2611,7 @@ function AppInner({ onLock }) {
     }, 900);
     return () => clearTimeout(saveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, ready, incidentLoaded]);
+  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, ready, incidentLoaded]);
 
   // real-time: subscribe to this incident's Firestore doc so other
   // users' changes appear here immediately, no polling needed.
@@ -2584,7 +2628,7 @@ function AppInner({ onLock }) {
   }, [ready, incidentLoaded, incident.id]);
 
   const startNew = () => {
-    applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [] });
+    applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {} });
     setIncidentLoaded(true);
     setShowLib(false);
   };
@@ -2667,7 +2711,7 @@ function AppInner({ onLock }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs })}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed })}>Print / Export</Btn>
               <Btn kind="ghost" onClick={() => setShowChangePin(true)} style={{ padding: "6px 9px", fontSize: 12 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 9px", fontSize: 12 }}>Lock</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
@@ -2714,6 +2758,7 @@ function AppInner({ onLock }) {
                   ics206={ics206} setIcs206={setIcs206}
                   logs={logs} setLogs={setLogs}
                   objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset}
+                  formsUsed={formsUsed} toggleFormUsed={toggleFormUsed}
                 />
               )}
             </>
