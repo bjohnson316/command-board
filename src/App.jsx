@@ -2297,8 +2297,17 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 480, maxHeight: "80vh", overflow: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${COLORS.line}` }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em" }}>Incident Library</span>
-          {!mandatory && <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img src={KFD_PATCH_DATA_URI} alt="KFD Patch" style={{ width: 26, height: 34, objectFit: "contain", flexShrink: 0 }} />
+            <div>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, letterSpacing: "0.03em", lineHeight: 1.1 }}>COMMAND BOARD</div>
+              <div style={{ fontSize: 9, color: COLORS.muted, letterSpacing: "0.06em", textTransform: "uppercase" }}>Incident Management System</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, color: COLORS.muted, letterSpacing: "0.05em", textTransform: "uppercase" }}>Incident Library</span>
+            {!mandatory && <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>}
+          </div>
         </div>
         <div style={{ padding: 16 }}>
           <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 12, lineHeight: 1.5 }}>
