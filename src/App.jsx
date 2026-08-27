@@ -2556,6 +2556,24 @@ function AppInner({ onLock }) {
     })();
   }, []);
 
+  // The incident's Date/Time Initiated is the natural starting point
+  // for every ICS form's Operational Period — auto-fill it into each
+  // form's "From" field the first time that field is blank, so it
+  // doesn't have to be retyped on every form. Never overwrites a
+  // value someone's already entered (checks for blank before setting).
+  useEffect(() => {
+    if (!ready || !incidentLoaded) return;
+    if (!incident.dateInitiated && !incident.timeInitiated) return;
+    const combined = incident.dateInitiated ? `${incident.dateInitiated}T${incident.timeInitiated || "00:00"}` : "";
+    if (!combined) return;
+    setComms(c => c.opFrom ? c : { ...c, opFrom: combined });
+    setSafety(s => s.opFrom ? s : { ...s, opFrom: combined });
+    setIcs208(v => v.opFrom ? v : { ...v, opFrom: combined });
+    setIcs208hm(v => v.opFrom ? v : { ...v, opFrom: combined });
+    setIcs209(v => v.opFrom ? v : { ...v, opFrom: combined });
+    setIcs206(v => v.opFrom ? v : { ...v, opFrom: combined });
+  }, [incident.dateInitiated, incident.timeInitiated, ready, incidentLoaded]);
+
   const saveUnitPreset = async (unit) => {
     if (!unit || presets.units.includes(unit)) return;
     const next = { ...presets, units: [...presets.units, unit] };
