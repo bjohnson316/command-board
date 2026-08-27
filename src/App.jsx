@@ -426,10 +426,10 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 /* ============================================================
    TAB: RESOURCE STATUS BOARD
    ============================================================ */
-function ResourceForm({ onAdd, unitPresets, onSavePreset }) {
+function ResourceForm({ onAdd, unitPresets, onSavePreset, assignmentPresets, onSaveAssignmentPreset }) {
   const [f, setF] = useState({ label: "", kind: RESOURCE_KINDS[0], personnel: 1, assignment: "" });
-  const [addingNew, setAddingNew] = useState(false);
-  const [newUnitName, setNewUnitName] = useState("");
+  const [addingField, setAddingField] = useState(null); // null | "unit" | "assignment"
+  const [newValue, setNewValue] = useState("");
 
   const submit = () => {
     if (!f.label.trim()) return;
@@ -437,28 +437,29 @@ function ResourceForm({ onAdd, unitPresets, onSavePreset }) {
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "" });
   };
 
-  const confirmAddUnit = () => {
-    const name = newUnitName.trim();
+  const startAdding = (field) => { setAddingField(field); setNewValue(""); };
+  const confirmAdd = () => {
+    const name = newValue.trim();
     if (!name) return;
-    onSavePreset(name);
-    setF({ ...f, label: name });
-    setAddingNew(false);
-    setNewUnitName("");
+    if (addingField === "unit") { onSavePreset(name); setF(prev => ({ ...prev, label: name })); }
+    else { onSaveAssignmentPreset(name); setF(prev => ({ ...prev, assignment: name })); }
+    setAddingField(null);
+    setNewValue("");
   };
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
       <Field label="Unit / Resource ID">
-        {addingNew ? (
+        {addingField === "unit" ? (
           <div style={{ display: "flex", gap: 4 }}>
-            <TextInput autoFocus value={newUnitName} onChange={e => setNewUnitName(e.target.value)} placeholder="New unit name" style={{ width: 150 }}
-              onKeyDown={e => { if (e.key === "Enter") confirmAddUnit(); if (e.key === "Escape") setAddingNew(false); }} />
-            <Btn kind="solid" onClick={confirmAddUnit} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
-            <button onClick={() => setAddingNew(false)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New unit name" style={{ width: 150 }}
+              onKeyDown={e => { if (e.key === "Enter") confirmAdd(); if (e.key === "Escape") setAddingField(null); }} />
+            <Btn kind="solid" onClick={confirmAdd} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingField(null)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
           </div>
         ) : (
           <Select value={f.label} onChange={e => {
-            if (e.target.value === "__add_new__") { setAddingNew(true); setNewUnitName(""); }
+            if (e.target.value === "__add_new__") startAdding("unit");
             else setF({ ...f, label: e.target.value });
           }} style={{ width: 200 }}>
             <option value="">Select a unit...</option>
@@ -473,7 +474,25 @@ function ResourceForm({ onAdd, unitPresets, onSavePreset }) {
         </Select>
       </Field>
       <Field label="Personnel"><TextInput type="number" min="0" value={f.personnel} onChange={e => setF({ ...f, personnel: e.target.value })} style={{ width: 80 }} /></Field>
-      <Field label="Assignment / Division"><TextInput value={f.assignment} onChange={e => setF({ ...f, assignment: e.target.value })} placeholder="Div A, Branch 1..." style={{ width: 160 }} /></Field>
+      <Field label="Assignment / Division">
+        {addingField === "assignment" ? (
+          <div style={{ display: "flex", gap: 4 }}>
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New assignment" style={{ width: 150 }}
+              onKeyDown={e => { if (e.key === "Enter") confirmAdd(); if (e.key === "Escape") setAddingField(null); }} />
+            <Btn kind="solid" onClick={confirmAdd} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingField(null)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ) : (
+          <Select value={f.assignment} onChange={e => {
+            if (e.target.value === "__add_new__") startAdding("assignment");
+            else setF({ ...f, assignment: e.target.value });
+          }} style={{ width: 180 }}>
+            <option value="">Select assignment...</option>
+            {assignmentPresets.map(a => <option key={a} value={a}>{a}</option>)}
+            <option value="__add_new__">+ Add Assignment</option>
+          </Select>
+        )}
+      </Field>
       <Btn kind="solid" icon={Plus} onClick={submit}>Check In</Btn>
     </div>
   );
@@ -534,7 +553,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, unitPresets, onSavePreset }) {
+function TabResources({ resources, setResources, now, unitPresets, onSavePreset, assignmentPresets, onSaveAssignmentPreset }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -576,7 +595,7 @@ function TabResources({ resources, setResources, now, unitPresets, onSavePreset 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Check In Resource" icon={Truck}>
-        <ResourceForm onAdd={addResource} unitPresets={unitPresets} onSavePreset={onSavePreset} />
+        <ResourceForm onAdd={addResource} unitPresets={unitPresets} onSavePreset={onSavePreset} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} />
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
@@ -2791,7 +2810,7 @@ function AppInner({ onLock }) {
   const [showChangePin, setShowChangePin] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ units: [], objectives: [] });
+  const [presets, setPresets] = useState({ units: [], objectives: [], assignments: [] });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -2826,7 +2845,7 @@ function AppInner({ onLock }) {
       const idx = await loadIndex();
       setIndex(idx);
       const p = await loadPresets();
-      setPresets({ units: p.units || [], objectives: p.objectives || [] });
+      setPresets({ units: p.units || [], objectives: p.objectives || [], assignments: p.assignments || [] });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -2877,6 +2896,12 @@ function AppInner({ onLock }) {
   const saveObjectivePreset = async (objective) => {
     if (!objective || presets.objectives.includes(objective)) return;
     const next = { ...presets, objectives: [...presets.objectives, objective] };
+    setPresets(next);
+    await savePresets(next);
+  };
+  const saveAssignmentPreset = async (assignment) => {
+    if (!assignment || presets.assignments.includes(assignment)) return;
+    const next = { ...presets, assignments: [...presets.assignments, assignment] };
     setPresets(next);
     await savePresets(next);
   };
@@ -3074,7 +3099,7 @@ function AppInner({ onLock }) {
           ) : (
             <>
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
-              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} unitPresets={presets.units} onSavePreset={saveUnitPreset} />}
+              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} unitPresets={presets.units} onSavePreset={saveUnitPreset} assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
