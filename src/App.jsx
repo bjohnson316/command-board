@@ -2806,40 +2806,40 @@ function AppInner({ onLock }) {
     })();
   }, []);
 
-  // The incident's Date/Time Initiated is the natural starting point
-  // for every ICS form's Operational Period — auto-fill it into each
-  // form's "From" field the first time that field is blank, so it
-  // doesn't have to be retyped on every form. Never overwrites a
-  // value someone's already entered (checks for blank before setting).
+  // The incident's Date/Time Initiated is the starting point for every
+  // ICS form's Operational Period — kept in sync with each form's
+  // "From" field on every change. This always overwrites, by design:
+  // if a specific form needs its own different operational period,
+  // set it there AFTER the incident's initiated time is finalized, or
+  // it'll get overwritten the next time Date/Time Initiated changes.
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
     if (!incident.dateInitiated && !incident.timeInitiated) return;
     const combined = incident.dateInitiated ? `${incident.dateInitiated}T${incident.timeInitiated || "00:00"}` : "";
     if (!combined) return;
-    setComms(c => c.opFrom ? c : { ...c, opFrom: combined });
-    setSafety(s => s.opFrom ? s : { ...s, opFrom: combined });
-    setIcs208(v => v.opFrom ? v : { ...v, opFrom: combined });
-    setIcs208hm(v => v.opFrom ? v : { ...v, opFrom: combined });
-    setIcs209(v => v.opFrom ? v : { ...v, opFrom: combined });
-    setIcs206(v => v.opFrom ? v : { ...v, opFrom: combined });
+    setComms(c => ({ ...c, opFrom: combined }));
+    setSafety(s => ({ ...s, opFrom: combined }));
+    setIcs208(v => ({ ...v, opFrom: combined }));
+    setIcs208hm(v => ({ ...v, opFrom: combined }));
+    setIcs209(v => ({ ...v, opFrom: combined }));
+    setIcs206(v => ({ ...v, opFrom: combined }));
   }, [incident.dateInitiated, incident.timeInitiated, ready, incidentLoaded]);
 
   // Same idea for "Operational Period To" — paired with Date/Time
-  // Terminated. Falls back to Date Initiated if Date Terminated
-  // hasn't been filled in (covers the common same-day case without
-  // requiring it to be entered explicitly). Only fills fields that
-  // are still blank.
+  // Terminated, falling back to Date Initiated if Date Terminated
+  // hasn't been filled in (covers the common same-day case). Always
+  // overwrites on every change, same tradeoff as the "From" sync above.
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
     const terminationDate = incident.dateTerminated || incident.dateInitiated;
     if (!terminationDate || !incident.timeTerminated) return;
     const combinedTo = `${terminationDate}T${incident.timeTerminated}`;
-    setComms(c => c.opTo ? c : { ...c, opTo: combinedTo });
-    setSafety(s => s.opTo ? s : { ...s, opTo: combinedTo });
-    setIcs208(v => v.opTo ? v : { ...v, opTo: combinedTo });
-    setIcs208hm(v => v.opTo ? v : { ...v, opTo: combinedTo });
-    setIcs209(v => v.opTo ? v : { ...v, opTo: combinedTo });
-    setIcs206(v => v.opTo ? v : { ...v, opTo: combinedTo });
+    setComms(c => ({ ...c, opTo: combinedTo }));
+    setSafety(s => ({ ...s, opTo: combinedTo }));
+    setIcs208(v => ({ ...v, opTo: combinedTo }));
+    setIcs208hm(v => ({ ...v, opTo: combinedTo }));
+    setIcs209(v => ({ ...v, opTo: combinedTo }));
+    setIcs206(v => ({ ...v, opTo: combinedTo }));
   }, [incident.dateInitiated, incident.dateTerminated, incident.timeTerminated, ready, incidentLoaded]);
 
   const saveUnitPreset = async (unit) => {
