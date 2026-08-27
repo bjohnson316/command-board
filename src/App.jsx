@@ -95,6 +95,8 @@ function blankIncident() {
     prepDateTime: "",
     dateInitiated: "",
     timeInitiated: "",
+    timeTerminated: "",
+    dateTerminated: "",
     opStart: nowISO(),
     wind: "",
     temp: "",
@@ -123,7 +125,7 @@ function normalizeIncident(inc) {
   // Actions/Tactics log, and the Resource Order-tracking table).
   return {
     prepPosition: "", prepSignature: "", prepDateTime: "",
-    dateInitiated: "", timeInitiated: "",
+    dateInitiated: "", timeInitiated: "", timeTerminated: "", dateTerminated: "",
     actionsLog: [], resourceOrders: [], mapSketch: "",
     ...migrated,
   };
@@ -328,6 +330,10 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <Field label="Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
           <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+          <Field label="Date Terminated"><TextInput type="date" value={incident.dateTerminated} onChange={e => setIncident({ ...incident, dateTerminated: e.target.value })} /></Field>
+          <Field label="Time Terminated"><TextInput type="time" value={incident.timeTerminated} onChange={e => setIncident({ ...incident, timeTerminated: e.target.value })} /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
@@ -2573,6 +2579,24 @@ function AppInner({ onLock }) {
     setIcs209(v => v.opFrom ? v : { ...v, opFrom: combined });
     setIcs206(v => v.opFrom ? v : { ...v, opFrom: combined });
   }, [incident.dateInitiated, incident.timeInitiated, ready, incidentLoaded]);
+
+  // Same idea for "Operational Period To" — paired with Date/Time
+  // Terminated. Falls back to Date Initiated if Date Terminated
+  // hasn't been filled in (covers the common same-day case without
+  // requiring it to be entered explicitly). Only fills fields that
+  // are still blank.
+  useEffect(() => {
+    if (!ready || !incidentLoaded) return;
+    const terminationDate = incident.dateTerminated || incident.dateInitiated;
+    if (!terminationDate || !incident.timeTerminated) return;
+    const combinedTo = `${terminationDate}T${incident.timeTerminated}`;
+    setComms(c => c.opTo ? c : { ...c, opTo: combinedTo });
+    setSafety(s => s.opTo ? s : { ...s, opTo: combinedTo });
+    setIcs208(v => v.opTo ? v : { ...v, opTo: combinedTo });
+    setIcs208hm(v => v.opTo ? v : { ...v, opTo: combinedTo });
+    setIcs209(v => v.opTo ? v : { ...v, opTo: combinedTo });
+    setIcs206(v => v.opTo ? v : { ...v, opTo: combinedTo });
+  }, [incident.dateInitiated, incident.dateTerminated, incident.timeTerminated, ready, incidentLoaded]);
 
   const saveUnitPreset = async (unit) => {
     if (!unit || presets.units.includes(unit)) return;
