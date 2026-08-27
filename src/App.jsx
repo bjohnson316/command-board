@@ -3,7 +3,7 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon
+  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlob, saveIncidentBlob,
@@ -3003,7 +3003,7 @@ function AppInner({ onLock }) {
                 {elapsed(incident.opStart, incident.opEnd ? new Date(incident.opEnd).getTime() : now)}
                 {incident.opEnd && <span style={{ color: COLORS.faint, fontSize: 10, marginLeft: 2 }}>STOPPED</span>}
               </div>
-              <Btn kind="ghost"
+              <Btn kind="ghost" icon={Clock}
                 onClick={() => setIncident(incident.opEnd
                   ? { ...incident, opStart: nowISO(), opEnd: null }
                   : { ...incident, opEnd: nowISO() })}
@@ -3018,7 +3018,7 @@ function AppInner({ onLock }) {
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
-              <Btn kind="ghost" onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
+              <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
