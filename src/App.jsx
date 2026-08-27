@@ -165,7 +165,7 @@ function defaultIcs209() {
   const statusRow = () => ({ period: "", total: "" });
   return {
     reportVersion: "Initial", reportNumber: "",
-    icAgency: "", imTeam: "",
+    icAgency: "", icAgencyOrg: "", imTeam: "",
     startDate: "", startTime: "", startTimeZone: "CST",
     sizeArea: "", percentContained: "",
     definition: "", complexityLevel: "",
@@ -1056,7 +1056,8 @@ function Tab209({ ics209, setIcs209, incident }) {
             </Select>
           </Field>
           <Field label="Report # (if used)"><TextInput value={ics209.reportNumber} onChange={e => set({ reportNumber: e.target.value })} /></Field>
-          <Field label="Incident Commander(s) & Agency/Organization"><TextInput value={ics209.icAgency} onChange={e => set({ icAgency: e.target.value })} /></Field>
+          <Field label="Incident Commander(s)"><TextInput value={incident.icName} disabled style={{ opacity: 0.65 }} /></Field>
+          <Field label="Agency/Organization (optional)"><TextInput value={ics209.icAgencyOrg} onChange={e => set({ icAgencyOrg: e.target.value })} placeholder="KFD, or list for Unified Command" /></Field>
           <Field label="Incident Management Organization"><TextInput value={ics209.imTeam} onChange={e => set({ imTeam: e.target.value })} placeholder="Type 1/2/3 IMT, Unified Command..." /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
@@ -1998,7 +1999,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     heading(L, "ICS-209 · Incident Status Summary");
     push(`Incident Start: ${incident.dateInitiated || "-"} ${incident.timeInitiated || "-"} CST`, "H", 9);
     push(`Report Version: ${ics209.reportVersion || "-"}   Prepared: ${ics209.preparedDateTime || "-"}   For Period: ${ics209.opFrom || "-"} to ${ics209.opTo || "-"}`, "H", 9);
-    push(`IC/Agency: ${ics209.icAgency || "-"}   Size/Area: ${ics209.sizeArea || "-"}   % Contained: ${ics209.percentContained || "-"}`, "H", 9);
+    push(`IC/Agency: ${incident.icName || "-"}${ics209.icAgencyOrg ? " - " + ics209.icAgencyOrg : ""}   Size/Area: ${ics209.sizeArea || "-"}   % Contained: ${ics209.percentContained || "-"}`, "H", 9);
     push(`Definition: ${ics209.definition || "-"}   Complexity: ${ics209.complexityLevel || "-"}`, "H", 9);
     push(`Location: ${ics209.shortLocation || "-"}`, "H", 9);
     push("Significant Events:", "HB", 9);
