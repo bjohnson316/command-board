@@ -99,6 +99,7 @@ function blankIncident() {
     timeTerminated: "",
     dateTerminated: "",
     opStart: nowISO(),
+    pausedElapsedMs: 0,
     wind: "",
     temp: "",
     rh: "",
@@ -128,6 +129,7 @@ function normalizeIncident(inc) {
     prepPosition: "", prepSignature: "", prepDateTime: "",
     dateInitiated: "", timeInitiated: "", timeTerminated: "", dateTerminated: "",
     actionsLog: [], resourceOrders: [], mapSketch: "",
+    pausedElapsedMs: 0,
     ...migrated,
   };
 }
@@ -3049,13 +3051,26 @@ function AppInner({ onLock }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: COLORS.amber }}>
                 <Clock size={14} />
-                {elapsed(incident.opStart, incident.opEnd ? new Date(incident.opEnd).getTime() : now)}
+                {fmtDuration((incident.pausedElapsedMs || 0) + (incident.opEnd ? 0 : Math.max(0, now - new Date(incident.opStart).getTime())))}
                 {incident.opEnd && <span style={{ color: COLORS.faint, fontSize: 10, marginLeft: 2 }}>STOPPED</span>}
               </div>
               <Btn kind="ghost" icon={Clock}
-                onClick={() => setIncident(incident.opEnd
-                  ? { ...incident, opStart: nowISO(), opEnd: null }
-                  : { ...incident, opEnd: nowISO() })}
+                onClick={() => {
+                  if (incident.opEnd) {
+                    // Resuming: start a fresh running segment. The time
+                    // already accumulated (pausedElapsedMs) is preserved
+                    // as-is — only opStart resets, as the reference point
+                    // for counting the NEW segment, not the total.
+                    setIncident({ ...incident, opStart: nowISO(), opEnd: null });
+                  } else {
+                    // Stopping: fold this segment's elapsed time into the
+                    // running total before freezing the display, instead
+                    // of discarding it (which is what the old opStart-only
+                    // reset on resume used to do).
+                    const segmentMs = Math.max(0, Date.now() - new Date(incident.opStart).getTime());
+                    setIncident({ ...incident, pausedElapsedMs: (incident.pausedElapsedMs || 0) + segmentMs, opEnd: nowISO() });
+                  }
+                }}
                 style={{ padding: "6px 11px", fontSize: 12.5 }}>
                 {incident.opEnd ? "Resume Clock" : "Stop Clock"}
               </Btn>
