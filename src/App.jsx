@@ -52,6 +52,107 @@ const SECTION_CHIEFS = [
   "Logistics Section Chief", "Finance/Admin Section Chief",
 ];
 
+/* ============================================================
+   ORG CHART DATA MODEL
+   A tree, matching the FEMA ICS org chart's actual shape: IC at
+   the top, Command Staff (Safety/PIO/Liaison) and the four Section
+   Chiefs reporting to IC, and each Section Chief able to expand
+   downward into Branches -> Divisions/Groups -> further sub-units,
+   arbitrarily deep. This replaced an earlier flat/fixed-position
+   model (org.positions + org.divisions) that couldn't represent
+   that structure or be expanded — normalizeOrg() below migrates any
+   data saved under the old shape so nothing is lost.
+   ============================================================ */
+function blankOrg() {
+  return {
+    ic: "", deputyIc: "",
+    commandStaff: [
+      { id: uid(), title: "Safety Officer", name: "" },
+      { id: uid(), title: "Public Information Officer", name: "" },
+      { id: uid(), title: "Liaison Officer", name: "" },
+    ],
+    sections: SECTION_CHIEFS.map(title => ({ id: uid(), title, name: "", children: [] })),
+  };
+}
+
+function normalizeOrg(org) {
+  if (!org) return blankOrg();
+  if (org.sections) {
+    // Already the current shape — fill in anything defensively missing.
+    return { ic: org.ic || "", deputyIc: org.deputyIc || "", commandStaff: org.commandStaff || [], sections: org.sections || [] };
+  }
+  // Old shape: { positions: { [fixedTitle]: name }, divisions: [{id,name,supervisor}] }
+  const positions = org.positions || {};
+  const divisions = org.divisions || [];
+  return {
+    ic: positions["Incident Commander"] || "",
+    deputyIc: positions["Deputy IC"] || "",
+    commandStaff: [
+      { id: uid(), title: "Safety Officer", name: positions["Safety Officer"] || "" },
+      { id: uid(), title: "Public Information Officer", name: positions["Public Information Officer"] || "" },
+      { id: uid(), title: "Liaison Officer", name: positions["Liaison Officer"] || "" },
+    ],
+    sections: SECTION_CHIEFS.map(title => ({
+      id: uid(),
+      title,
+      name: positions[title] || "",
+      // Old divisions/groups had no section of their own — they were
+      // implicitly under Operations, so that's where they land here.
+      children: title === "Operations Section Chief"
+        ? divisions.map(d => ({ id: d.id || uid(), title: d.name || "Division/Group", name: d.supervisor || "", children: [] }))
+        : [],
+    })),
+  };
+}
+
+// Recursive tree edits — operate on the `sections` array by node id,
+// wherever that node actually lives in the nesting.
+function updateOrgNode(sections, nodeId, patch) {
+  return sections.map(node => {
+    if (node.id === nodeId) return { ...node, ...patch };
+    if (node.children && node.children.length) return { ...node, children: updateOrgNode(node.children, nodeId, patch) };
+    return node;
+  });
+}
+function deleteOrgNode(sections, nodeId) {
+  return sections
+    .filter(node => node.id !== nodeId)
+    .map(node => node.children && node.children.length ? { ...node, children: deleteOrgNode(node.children, nodeId) } : node);
+}
+function addOrgChild(sections, parentId, child) {
+  return sections.map(node => {
+    if (node.id === parentId) return { ...node, children: [...(node.children || []), child] };
+    if (node.children && node.children.length) return { ...node, children: addOrgChild(node.children, parentId, child) };
+    return node;
+  });
+}
+
+// Flattened views for consumers that just need a summary list, not the
+// visual tree — the PDF export and the "Current Organization" summary
+// on the full ICS-201 form.
+function flattenOrgFilled(org) {
+  const out = [];
+  if (org.ic) out.push({ title: "Incident Commander", name: org.ic });
+  if (org.deputyIc) out.push({ title: "Deputy IC", name: org.deputyIc });
+  org.commandStaff.forEach(cs => { if (cs.name) out.push({ title: cs.title, name: cs.name }); });
+  const walk = (node, depth) => {
+    if (node.name) out.push({ title: node.title, name: node.name, depth });
+    (node.children || []).forEach(c => walk(c, depth + 1));
+  };
+  org.sections.forEach(s => walk(s, 0));
+  return out;
+}
+// Every node's title, at any depth — used to populate the
+// Division/Group picker on ICS-215A regardless of which section a
+// division was added under.
+function flattenOrgTitles(org) {
+  const out = [];
+  const walk = (node) => { if (node.title) out.push(node.title); (node.children || []).forEach(walk); };
+  org.sections.forEach(walk);
+  return out;
+}
+
+
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const nowISO = () => new Date().toISOString();
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
@@ -962,42 +1063,140 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
 /* ============================================================
    TAB: ORG CHART / COMMAND STRUCTURE
    ============================================================ */
+// A single box in the org chart — title (usually fixed, but editable
+// for command-staff and expanded nodes so new positions can be named
+// anything) plus the name of whoever holds it.
+function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild, titleEditable, isRoot }) {
+  return (
+    <div style={{
+      background: isRoot ? COLORS.panel2 : COLORS.panel, border: `1.5px solid ${isRoot ? COLORS.amber : COLORS.line}`,
+      borderRadius: 6, padding: "8px 10px", width: 168, textAlign: "center", position: "relative", flexShrink: 0,
+    }}>
+      {onDelete && (
+        <button onClick={onDelete} title="Remove" style={{ position: "absolute", top: 2, right: 2, background: "none", border: "none", color: COLORS.faint, cursor: "pointer", padding: 2, lineHeight: 0 }}>
+          <X size={12} />
+        </button>
+      )}
+      {titleEditable ? (
+        <TextInput value={title} onChange={e => onTitleChange(e.target.value)}
+          style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", marginBottom: 5, color: COLORS.amber }} />
+      ) : (
+        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", color: COLORS.amber, marginBottom: 5, lineHeight: 1.3 }}>{title}</div>
+      )}
+      <TextInput value={name} onChange={e => onNameChange(e.target.value)} placeholder="Name" style={{ fontSize: 12.5, textAlign: "center", padding: "5px 6px" }} />
+      {onAddChild && (
+        <button onClick={onAddChild} title="Add sub-unit below this one" style={{ marginTop: 6, background: "none", border: `1px dashed ${COLORS.line}`, borderRadius: 4, color: COLORS.muted, cursor: "pointer", fontSize: 10, padding: "3px 7px", width: "100%" }}>
+          + Add Below
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Straight connector lines: a stem down from a parent, splitting into
+// a horizontal bar that drops a stem into each child below it —
+// the standard org-chart connector look.
+function OrgConnectors({ children }) {
+  if (!children || children.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+      <div style={{ width: 2, height: 14, background: COLORS.line }} />
+      <div style={{ display: "flex", alignItems: "flex-start", position: "relative" }}>
+        {children.length > 1 && (
+          <div style={{ position: "absolute", top: 0, left: 84, right: 84, height: 2, background: COLORS.line }} />
+        )}
+        {children.map((child, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 10px" }}>
+            <div style={{ width: 2, height: 14, background: COLORS.line }} />
+            {child}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Recursively renders one node and, if it has children, the connector
+// + child nodes below it — this is what lets a Section Chief expand
+// into Branches -> Divisions/Groups -> further sub-units arbitrarily
+// deep, since each level is rendered by the same component calling
+// itself on its own children.
+function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <OrgBox
+        title={node.title} name={node.name} titleEditable
+        onTitleChange={v => onUpdate(node.id, { title: v })}
+        onNameChange={v => onUpdate(node.id, { name: v })}
+        onDelete={() => onDelete(node.id)}
+        onAddChild={() => onAddChild(node.id)}
+      />
+      {node.children && node.children.length > 0 && (
+        <OrgConnectors>
+          {node.children.map(child => (
+            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} />
+          ))}
+        </OrgConnectors>
+      )}
+    </div>
+  );
+}
+
 function TabOrg({ org, setOrg }) {
-  const setPos = (pos, val) => setOrg({ ...org, positions: { ...org.positions, [pos]: val } });
-  const addDiv = () => setOrg({ ...org, divisions: [...org.divisions, { id: uid(), name: "", supervisor: "" }] });
-  const updateDiv = (id, patch) => setOrg({ ...org, divisions: org.divisions.map(d => d.id === id ? { ...d, ...patch } : d) });
-  const removeDiv = (id) => setOrg({ ...org, divisions: org.divisions.filter(d => d.id !== id) });
+  const setIc = (v) => setOrg({ ...org, ic: v });
+  const setDeputyIc = (v) => setOrg({ ...org, deputyIc: v });
+  const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "" }] });
+  const updateCommandStaff = (id, patch) => setOrg({ ...org, commandStaff: org.commandStaff.map(c => c.id === id ? { ...c, ...patch } : c) });
+  const removeCommandStaff = (id) => setOrg({ ...org, commandStaff: org.commandStaff.filter(c => c.id !== id) });
+
+  const updateSection = (nodeId, patch) => setOrg({ ...org, sections: updateOrgNode(org.sections, nodeId, patch) });
+  const deleteSection = (nodeId) => {
+    // The four Section Chief boxes are the permanent top level — only
+    // nodes added underneath them (Branches/Divisions/Groups/etc.) can
+    // actually be removed.
+    if (org.sections.some(s => s.id === nodeId)) return;
+    setOrg({ ...org, sections: deleteOrgNode(org.sections, nodeId) });
+  };
+  const addSectionChild = (parentId) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [] }) });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Panel title="Command & General Staff" icon={Shield}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {CG_POSITIONS.map(pos => (
-            <Field key={pos} label={pos}>
-              <TextInput value={org.positions[pos] || ""} onChange={e => setPos(pos, e.target.value)} placeholder="Name" />
-            </Field>
-          ))}
+      <Panel title="Organization Chart" icon={Shield}>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 18, lineHeight: 1.5 }}>
+          Type a name into any box to fill that position. Use "+ Add Below" on a Section Chief (or any box beneath one) to expand into Branches, Divisions, or Groups — add as many levels as the incident needs.
         </div>
-      </Panel>
-      <Panel title="Section Chiefs" icon={Users}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {SECTION_CHIEFS.map(pos => (
-            <Field key={pos} label={pos}>
-              <TextInput value={org.positions[pos] || ""} onChange={e => setPos(pos, e.target.value)} placeholder="Name" />
-            </Field>
-          ))}
-        </div>
-      </Panel>
-      <Panel title="Divisions / Groups / Branches (Operations)" icon={ChevronRight} right={<Btn kind="subtle" icon={Plus} onClick={addDiv}>Add</Btn>}>
-        {org.divisions.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint }}>No divisions/groups established.</div>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {org.divisions.map(d => (
-            <div key={d.id} style={{ display: "flex", gap: 8 }}>
-              <TextInput value={d.name} onChange={e => updateDiv(d.id, { name: e.target.value })} placeholder="Division A / Group: Ventilation..." style={{ flex: 1 }} />
-              <TextInput value={d.supervisor} onChange={e => updateDiv(d.id, { supervisor: e.target.value })} placeholder="Supervisor" style={{ flex: 1 }} />
-              <Btn kind="danger" onClick={() => removeDiv(d.id)}><Trash2 size={14} /></Btn>
+        <div style={{ overflowX: "auto", paddingBottom: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "fit-content", margin: "0 auto" }}>
+            {/* Incident Commander (+ optional Deputy) at the top */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <OrgBox title="Incident Commander" name={org.ic} onNameChange={setIc} isRoot />
+              <OrgBox title="Deputy IC" name={org.deputyIc} onNameChange={setDeputyIc} isRoot />
             </div>
-          ))}
+
+            <div style={{ width: 2, height: 16, background: COLORS.line }} />
+            <div style={{ display: "flex", gap: 40, borderTop: `2px solid ${COLORS.line}`, paddingTop: 16, flexWrap: "wrap", justifyContent: "center" }}>
+              {/* Command Staff cluster */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                  {org.commandStaff.map(cs => (
+                    <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable
+                      onTitleChange={v => updateCommandStaff(cs.id, { title: v })}
+                      onNameChange={v => updateCommandStaff(cs.id, { name: v })}
+                      onDelete={() => removeCommandStaff(cs.id)} />
+                  ))}
+                </div>
+                <button onClick={addCommandStaff} style={{ marginTop: 8, background: "none", border: `1px dashed ${COLORS.line}`, borderRadius: 4, color: COLORS.muted, cursor: "pointer", fontSize: 10.5, padding: "4px 10px" }}>
+                  + Add Command Staff
+                </button>
+              </div>
+              {/* Section Chiefs, each independently expandable */}
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
+                {org.sections.map(section => (
+                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </Panel>
     </div>
@@ -1759,11 +1958,7 @@ function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset
   const removeOrder = (id) => setIncident({ ...incident, resourceOrders: incident.resourceOrders.filter(r => r.id !== id) });
 
   const cell = { padding: "6px 6px", fontSize: 12.5, verticalAlign: "top" };
-  const orgLines = [
-    ...CG_POSITIONS.filter(p => org.positions[p]).map(p => `${p}: ${org.positions[p]}`),
-    ...SECTION_CHIEFS.filter(p => org.positions[p]).map(p => `${p}: ${org.positions[p]}`),
-    ...org.divisions.filter(d => d.name).map(d => `${d.name} - Supv: ${d.supervisor || "-"}`),
-  ];
+  const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2097,7 +2292,7 @@ function Tab215A({ safety, setSafety, org, incident }) {
   const addRow = () => setSafety({ ...safety, rows: [{ id: uid(), branch: "", division: "", hazards: "", mitigations: "" }, ...safety.rows] });
   const update = (id, patch) => setSafety({ ...safety, rows: safety.rows.map(r => r.id === id ? { ...r, ...patch } : r) });
   const remove = (id) => setSafety({ ...safety, rows: safety.rows.filter(r => r.id !== id) });
-  const divisionOptions = org.divisions.map(d => d.name).filter(Boolean);
+  const divisionOptions = flattenOrgTitles(org);
   const cell = { padding: "6px 6px", fontSize: 12.5, verticalAlign: "top" };
 
   return (
@@ -2145,7 +2340,7 @@ function Tab215A({ safety, setSafety, org, incident }) {
 
       <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "20px 0 8px" }}>Prepared By (Safety Officer)</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
-        <Field label="Name"><TextInput value={safety.preparedBy} onChange={e => setSafety({ ...safety, preparedBy: e.target.value })} placeholder={org.positions["Safety Officer"] || "Name"} /></Field>
+        <Field label="Name"><TextInput value={safety.preparedBy} onChange={e => setSafety({ ...safety, preparedBy: e.target.value })} placeholder={org.commandStaff.find(c => c.title === "Safety Officer")?.name || "Name"} /></Field>
         <Field label="Position / Title"><TextInput value={safety.position} onChange={e => setSafety({ ...safety, position: e.target.value })} placeholder="Safety Officer" /></Field>
         <Field label="Signature"><TextInput value={safety.signature} onChange={e => setSafety({ ...safety, signature: e.target.value })} placeholder="Type name to sign" /></Field>
         <Field label="Date / Time"><TextInput type="datetime-local" value={safety.dateTime} onChange={e => setSafety({ ...safety, dateTime: e.target.value })} /></Field>
@@ -2232,7 +2427,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   incident = incident || blankIncident();
   resources = resources || [];
   comms = normalizeComms(comms);
-  org = org || { positions: {}, divisions: [] };
+  org = normalizeOrg(org);
   safety = safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] };
   ics208 = { ...defaultIcs208(), ...(ics208 || {}) };
   ics208hm = { ...defaultIcs208HM(), ...(ics208hm || {}) };
@@ -2293,10 +2488,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
 
   heading(L, "9. Current Organization");
-  const orgLines = [
-    ...Object.entries(org.positions).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`),
-    ...org.divisions.filter(d => d.name).map(d => `${d.name} - Supv: ${d.supervisor || "-"}`),
-  ];
+  const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
   if (orgLines.length === 0) push("(none entered)");
   else orgLines.forEach(l => wrapPush(L, l));
   blank();
@@ -2669,8 +2861,7 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
       </table>
 
       <h2>Command Structure</h2>
-      <ul>{Object.entries(org.positions).filter(([, v]) => v).map(([k, v]) => <li key={k}>{k}: {v}</li>)}</ul>
-      <ul>{org.divisions.filter(d => d.name).map(d => <li key={d.id}>{d.name} — Supv: {d.supervisor}</li>)}</ul>
+      <ul>{flattenOrgFilled(org).map((item, i) => <li key={i}>{item.title}: {item.name}</li>)}</ul>
 
       <h2>ICS-205 Communications Plan</h2>
       <table border="1" cellPadding="4" style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -3398,7 +3589,7 @@ function AppInner({ onLock }) {
     suppressNextAutosave.current = true;
     setIncident(normalizeIncident(blob.incident));
     setResources(blob.resources || []);
-    setOrg(blob.org || { positions: {}, divisions: [] });
+    setOrg(normalizeOrg(blob.org));
     setComms(normalizeComms(blob.comms));
     setSafety(blob.safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
     // Shallow-merge onto fresh defaults rather than using the saved
@@ -3464,7 +3655,7 @@ function AppInner({ onLock }) {
   }, [ready, incidentLoaded, incident.id]);
 
   const startNew = () => {
-    applyBlob({ incident: blankIncident(), resources: [], org: { positions: {}, divisions: [] }, comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {} });
+    applyBlob({ incident: blankIncident(), resources: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {} });
     setAttachments([]);
     setIncidentLoaded(true);
     setShowLib(false);
