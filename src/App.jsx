@@ -340,6 +340,20 @@ function defaultMapData() {
   return { type: "FeatureCollection", features: [] };
 }
 
+// A text label on the map is a marker with a DivIcon rendering the
+// text directly (styled like a sticky note, not a location pin) —
+// used both when placing a new label and when reconstructing a saved
+// one on load (see the pointToLayer logic in TabMapping).
+function makeTextIcon(text) {
+  const esc = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return L.divIcon({
+    className: "cb-map-text-label",
+    html: `<div style="background:#fff;color:#191C1F;border:1.5px solid #96690F;border-radius:4px;padding:3px 7px;font:600 12px 'IBM Plex Sans',sans-serif;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.4);">${esc}</div>`,
+    iconSize: null, // let the content size itself rather than clipping to a fixed box
+    iconAnchor: [8, 8],
+  });
+}
+
 function defaultComms() {
   return {
     dateTimePrepared: "", opFrom: "", opTo: "", specialInstructions: "",
@@ -1181,11 +1195,15 @@ function TabMapping({ mapData, setMapData }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const drawnItemsRef = useRef(null);
+  const persistRef = useRef(() => {});
   const gpsMarkerRef = useRef(null);
   const gpsAccuracyRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
+  const freehandStateRef = useRef(null); // { points, tempLine } while actively drawing
   const [tracking, setTracking] = useState(false);
   const [gpsError, setGpsError] = useState("");
+  const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
+  const [textPrompt, setTextPrompt] = useState(null); // { latlng, value } while the text-label dialog is open
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -1211,15 +1229,19 @@ function TabMapping({ mapData, setMapData }) {
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
     if (mapData && mapData.features && mapData.features.length > 0) {
-      // pointToLayer reconstructs a real Circle (with its saved
-      // radius) for any Point feature that has a radius property —
-      // see the comment on persist() below for why that property has
-      // to be added manually in the first place. Points without a
-      // radius are genuine markers and load as normal.
+      // pointToLayer reconstructs the right marker type for a saved
+      // Point feature: a real Circle (with its saved radius) if the
+      // feature has a radius property, a styled text label if it has
+      // a textLabel property, otherwise a plain marker. Both radius
+      // and textLabel have to be added manually on save (see persist
+      // below) since GeoJSON's Point geometry alone can't carry them.
       L.geoJSON(mapData, {
-        pointToLayer: (feature, latlng) => "radius" in (feature.properties || {})
-          ? L.circle(latlng, { radius: feature.properties.radius })
-          : L.marker(latlng),
+        pointToLayer: (feature, latlng) => {
+          const props = feature.properties || {};
+          if ("radius" in props) return L.circle(latlng, { radius: props.radius });
+          if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
+          return L.marker(latlng);
+        },
       }).eachLayer(layer => drawnItems.addLayer(layer));
     }
 
@@ -1237,23 +1259,25 @@ function TabMapping({ mapData, setMapData }) {
     });
     map.addControl(drawControl);
 
-    // Any create/edit/delete re-saves the whole FeatureGroup as
-    // GeoJSON — simpler and safer than trying to patch individual
-    // features in and out of the saved state.
-    // L.Circle.toGeoJSON() does NOT include the radius in the
-    // feature's properties by default (GeoJSON has no native "circle"
-    // geometry — Leaflet serializes it as a Point) — without manually
-    // adding it here, a saved hazard-radius circle would silently
-    // come back as a plain marker with no radius on the next reload.
+    // Rebuilt per-layer rather than pairing up two separate calls to
+    // toGeoJSON() and eachLayer() by array index — that pairing
+    // assumed both would iterate drawnItems in the exact same order,
+    // which isn't guaranteed by Leaflet and could silently attach a
+    // radius to the wrong feature, or throw and abort the save
+    // entirely for that edit if the counts ever mismatched. Calling
+    // toGeoJSON() on each layer individually and patching its own
+    // result removes that assumption completely.
     const persist = () => {
-      const geojson = drawnItems.toGeoJSON();
-      let i = 0;
+      const features = [];
       drawnItems.eachLayer(layer => {
-        if (layer instanceof L.Circle) geojson.features[i].properties.radius = layer.getRadius();
-        i++;
+        const feature = layer.toGeoJSON();
+        if (layer instanceof L.Circle) feature.properties = { ...feature.properties, radius: layer.getRadius() };
+        if (layer.__textLabel) feature.properties = { ...feature.properties, textLabel: layer.__textLabel };
+        features.push(feature);
       });
-      setMapData(geojson);
+      setMapData({ type: "FeatureCollection", features });
     };
+    persistRef.current = persist;
     map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); persist(); });
     map.on(L.Draw.Event.EDITED, persist);
     map.on(L.Draw.Event.DELETED, persist);
@@ -1274,6 +1298,74 @@ function TabMapping({ mapData, setMapData }) {
     // in-progress local edit with an incoming remote one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Text-label and freehand tools are custom (leaflet-draw doesn't
+  // support either), so they're wired up in a separate effect keyed
+  // on which tool is active, rather than inside the mount-once effect
+  // above — this lets them attach/detach cleanly as the toolbar
+  // buttons are toggled without needing to tear down the whole map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (activeTool === "text") {
+      const handler = (e) => setTextPrompt({ latlng: e.latlng, value: "" });
+      map.on("click", handler);
+      return () => map.off("click", handler);
+    }
+
+    if (activeTool === "freehand") {
+      map.dragging.disable(); // otherwise dragging draws AND pans at once
+      const container = map.getContainer();
+      const toLatLng = (evt) => map.mouseEventToLatLng(evt);
+
+      const onDown = (evt) => {
+        evt.preventDefault();
+        const start = toLatLng(evt);
+        const tempLine = L.polyline([start], { color: "#2E8B72", weight: 3 }).addTo(map);
+        freehandStateRef.current = { points: [start], tempLine };
+      };
+      const onMove = (evt) => {
+        if (!freehandStateRef.current) return;
+        evt.preventDefault();
+        const pt = toLatLng(evt);
+        freehandStateRef.current.points.push(pt);
+        freehandStateRef.current.tempLine.setLatLngs(freehandStateRef.current.points);
+      };
+      const onUp = () => {
+        const state = freehandStateRef.current;
+        if (!state) return;
+        map.removeLayer(state.tempLine);
+        if (state.points.length > 1) {
+          const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
+          drawnItemsRef.current.addLayer(finalLine);
+          persistRef.current();
+        }
+        freehandStateRef.current = null;
+      };
+
+      container.addEventListener("pointerdown", onDown);
+      container.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      return () => {
+        map.dragging.enable();
+        container.removeEventListener("pointerdown", onDown);
+        container.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        if (freehandStateRef.current) { map.removeLayer(freehandStateRef.current.tempLine); freehandStateRef.current = null; }
+      };
+    }
+  }, [activeTool]);
+
+  const confirmTextLabel = () => {
+    const text = textPrompt.value.trim();
+    setTextPrompt(null);
+    if (!text || !mapRef.current) return;
+    const marker = L.marker(textPrompt.latlng, { icon: makeTextIcon(text) });
+    marker.__textLabel = text; // read by persist() above to save it back out
+    drawnItemsRef.current.addLayer(marker);
+    persistRef.current();
+  };
 
   const toggleTracking = () => {
     if (tracking) {
@@ -1310,16 +1402,39 @@ function TabMapping({ mapData, setMapData }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Mapping" icon={MapIcon} right={
-        <Btn kind={tracking ? "solid" : "subtle"} icon={Crosshair} onClick={toggleTracking} style={{ padding: "6px 11px", fontSize: 12.5 }}>
-          {tracking ? "Stop Location" : "Show My Location"}
-        </Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn kind={activeTool === "text" ? "solid" : "subtle"} onClick={() => setActiveTool(t => t === "text" ? null : "text")} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            {activeTool === "text" ? "Tap Map to Place Text" : "Add Text Label"}
+          </Btn>
+          <Btn kind={activeTool === "freehand" ? "solid" : "subtle"} onClick={() => setActiveTool(t => t === "freehand" ? null : "freehand")} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            {activeTool === "freehand" ? "Drawing… (tap to stop)" : "Freehand Draw"}
+          </Btn>
+          <Btn kind={tracking ? "solid" : "subtle"} icon={Crosshair} onClick={toggleTracking} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            {tracking ? "Stop Location" : "Show My Location"}
+          </Btn>
+        </div>
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Use the drawing tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest — saved automatically and shared across the board. Switch between street and satellite view from the layer control (top-right).
+          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil — all saved automatically and shared across the board. Switch between street and satellite view from the layer control (top-right).
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
         </div>
-        <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
+        <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}`, touchAction: activeTool === "freehand" ? "none" : "auto" }} />
       </Panel>
+
+      {textPrompt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+          <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Text Label</span>
+              <button onClick={() => setTextPrompt(null)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+            </div>
+            <TextInput autoFocus value={textPrompt.value} onChange={e => setTextPrompt({ ...textPrompt, value: e.target.value })}
+              placeholder="e.g. Staging Area, Command Post..." style={{ width: "100%" }}
+              onKeyDown={e => { if (e.key === "Enter") confirmTextLabel(); if (e.key === "Escape") setTextPrompt(null); }} />
+            <Btn kind="solid" onClick={confirmTextLabel} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>Place on Map</Btn>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
