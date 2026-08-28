@@ -3,7 +3,8 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon
+  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
+  Map as MapIcon, Crosshair
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -14,6 +15,21 @@ import {
 import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
 import PinGate from "./PinGate.jsx";
 import { sha256 } from "./pin";
+import L from "leaflet";
+import "leaflet-draw";
+import "leaflet/dist/leaflet.css";
+import "leaflet-draw/dist/leaflet.draw.css";
+// Leaflet's default marker icon paths break under Vite's bundling
+// (a well-known Leaflet + bundler issue — it expects to find its
+// icon images relative to a script-tag URL that doesn't exist here).
+// Pointing the default icon at CDN-hosted copies of the same images
+// sidesteps that entirely rather than fighting Vite's asset pipeline.
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+});
 
 /* ============================================================
    DESIGN TOKENS
@@ -315,6 +331,15 @@ function defaultIcs209() {
 function defaultIcs206() {
   return { aidStations: [], ambulances: [], hospitals: [], procedures: "", aviationAssets: false, preparedBy: "", preparedSignature: "", approvedBy: "", approvedSignature: "", dateTime: "" };
 }
+// Drawn map annotations (fire perimeter, hazard zones, staging areas,
+// points of interest, etc.) — stored as a standard GeoJSON
+// FeatureCollection, the format Leaflet's draw plugin natively reads
+// and writes, so no translation layer is needed between what's drawn
+// and what's saved/synced.
+function defaultMapData() {
+  return { type: "FeatureCollection", features: [] };
+}
+
 function defaultComms() {
   return {
     dateTimePrepared: "", opFrom: "", opTo: "", specialInstructions: "",
@@ -1138,6 +1163,163 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
           ))}
         </OrgConnectors>
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: MAPPING — Leaflet + OpenStreetMap (no API key/signup needed).
+   Drawn shapes (fire perimeter, hazard zones, staging areas, points
+   of interest) are stored as GeoJSON and synced like everything else
+   in the app. Leaflet is controlled imperatively via refs (same
+   pattern as the canvas-based org chart elsewhere in this file)
+   rather than through a React wrapper library, since the map's own
+   internal state (pan/zoom/drawn layers) doesn't need to live in
+   React at all — only the saved GeoJSON does.
+   ============================================================ */
+function TabMapping({ mapData, setMapData }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const drawnItemsRef = useRef(null);
+  const gpsMarkerRef = useRef(null);
+  const gpsAccuracyRef = useRef(null);
+  const gpsWatchIdRef = useRef(null);
+  const [tracking, setTracking] = useState(false);
+  const [gpsError, setGpsError] = useState("");
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    const map = L.map(containerRef.current, { center: [33.2635, -97.2286], zoom: 13 });
+    mapRef.current = map;
+
+    const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    // Esri World Imagery — free, no API key, no account required for
+    // reasonable-volume use like a single department's internal tool.
+    const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Tiles &copy; Esri",
+      maxZoom: 19,
+    });
+    L.control.layers({ "Street (OpenStreetMap)": streets, "Satellite (Esri)": satellite }, null, { position: "topright" }).addTo(map);
+
+    // The FeatureGroup leaflet-draw edits/deletes shapes within, and
+    // where previously-saved shapes get loaded back in on mount.
+    const drawnItems = new L.FeatureGroup();
+    drawnItemsRef.current = drawnItems;
+    map.addLayer(drawnItems);
+    if (mapData && mapData.features && mapData.features.length > 0) {
+      // pointToLayer reconstructs a real Circle (with its saved
+      // radius) for any Point feature that has a radius property —
+      // see the comment on persist() below for why that property has
+      // to be added manually in the first place. Points without a
+      // radius are genuine markers and load as normal.
+      L.geoJSON(mapData, {
+        pointToLayer: (feature, latlng) => "radius" in (feature.properties || {})
+          ? L.circle(latlng, { radius: feature.properties.radius })
+          : L.marker(latlng),
+      }).eachLayer(layer => drawnItems.addLayer(layer));
+    }
+
+    const drawControl = new L.Control.Draw({
+      position: "topleft",
+      draw: {
+        polygon: { shapeOptions: { color: "#C4341F" } }, // fire perimeter / hazard zones
+        polyline: { shapeOptions: { color: "#3B6FA6" } }, // hose lays, access routes
+        rectangle: { shapeOptions: { color: "#D9A02B" } },
+        circle: { shapeOptions: { color: "#D9A02B" } }, // hazard radius
+        marker: true,
+        circlemarker: false,
+      },
+      edit: { featureGroup: drawnItems },
+    });
+    map.addControl(drawControl);
+
+    // Any create/edit/delete re-saves the whole FeatureGroup as
+    // GeoJSON — simpler and safer than trying to patch individual
+    // features in and out of the saved state.
+    // L.Circle.toGeoJSON() does NOT include the radius in the
+    // feature's properties by default (GeoJSON has no native "circle"
+    // geometry — Leaflet serializes it as a Point) — without manually
+    // adding it here, a saved hazard-radius circle would silently
+    // come back as a plain marker with no radius on the next reload.
+    const persist = () => {
+      const geojson = drawnItems.toGeoJSON();
+      let i = 0;
+      drawnItems.eachLayer(layer => {
+        if (layer instanceof L.Circle) geojson.features[i].properties.radius = layer.getRadius();
+        i++;
+      });
+      setMapData(geojson);
+    };
+    map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); persist(); });
+    map.on(L.Draw.Event.EDITED, persist);
+    map.on(L.Draw.Event.DELETED, persist);
+
+    // Fixes Leaflet's canvas sizing when the map mounts inside a tab
+    // that wasn't visible (zero width/height) at the moment of init.
+    setTimeout(() => map.invalidateSize(), 100);
+
+    return () => {
+      if (gpsWatchIdRef.current != null) navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+      map.remove();
+      mapRef.current = null;
+    };
+    // Intentionally mount-once: mapData is only read here as the
+    // initial state (see the component comment above) — external
+    // updates from other devices show up next time this tab mounts,
+    // not live while it's already open, to avoid fighting an
+    // in-progress local edit with an incoming remote one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleTracking = () => {
+    if (tracking) {
+      if (gpsWatchIdRef.current != null) navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+      gpsWatchIdRef.current = null;
+      if (gpsMarkerRef.current) { mapRef.current.removeLayer(gpsMarkerRef.current); gpsMarkerRef.current = null; }
+      if (gpsAccuracyRef.current) { mapRef.current.removeLayer(gpsAccuracyRef.current); gpsAccuracyRef.current = null; }
+      setTracking(false);
+      return;
+    }
+    if (!navigator.geolocation) { setGpsError("This device/browser doesn't support GPS location."); return; }
+    setGpsError("");
+    let firstFix = true;
+    gpsWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const latlng = [latitude, longitude];
+        if (!gpsMarkerRef.current) {
+          gpsMarkerRef.current = L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: "#3B6FA6", fillOpacity: 1 }).addTo(mapRef.current);
+          gpsAccuracyRef.current = L.circle(latlng, { radius: accuracy, color: "#3B6FA6", weight: 1, fillOpacity: 0.1 }).addTo(mapRef.current);
+        } else {
+          gpsMarkerRef.current.setLatLng(latlng);
+          gpsAccuracyRef.current.setLatLng(latlng);
+          gpsAccuracyRef.current.setRadius(accuracy);
+        }
+        if (firstFix) { mapRef.current.setView(latlng, 16); firstFix = false; }
+      },
+      (err) => setGpsError(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
+      { enableHighAccuracy: true, maximumAge: 5000 }
+    );
+    setTracking(true);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Panel title="Mapping" icon={MapIcon} right={
+        <Btn kind={tracking ? "solid" : "subtle"} icon={Crosshair} onClick={toggleTracking} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+          {tracking ? "Stop Location" : "Show My Location"}
+        </Btn>
+      }>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
+          Use the drawing tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest — saved automatically and shared across the board. Switch between street and satellite view from the layer control (top-right).
+          {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
+        </div>
+        <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
+      </Panel>
     </div>
   );
 }
@@ -3553,6 +3735,7 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
 const TABS = [
   { k: "201", label: "Tactical Worksheet", icon: ClipboardList },
   { k: "resources", label: "Resource Board", icon: Truck },
+  { k: "mapping", label: "Mapping", icon: MapIcon },
   { k: "org", label: "Org Chart", icon: Users },
   { k: "rehab", label: "Rehab", icon: HeartPulse },
   { k: "icsforms", label: "ICS Forms", icon: Layers },
@@ -3667,6 +3850,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [ics209, setIcs209] = useState(defaultIcs209());
   const [ics206, setIcs206] = useState(defaultIcs206());
   const [rehab, setRehab] = useState([]);
+  const [mapData, setMapData] = useState(defaultMapData());
   const [logs, setLogs] = useState([]);
 
   const saveTimer = useRef(null);
@@ -3922,6 +4106,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setIcs206({ ...defaultIcs206(), ...(blob.ics206 || {}) });
     setFormsUsed(blob.formsUsed || {});
     setRehab(blob.rehab || []);
+    setMapData(blob.mapData || defaultMapData());
     setLogs(blob.logs || []);
     if (markSynced) lastKnownUpdatedAt.current = blob.updatedAt || null;
   }
@@ -3944,7 +4129,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const updatedAt = nowISO();
-      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, updatedAt };
+      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, updatedAt };
       const ok = await saveIncidentBlob(incident.id, blob);
       const meta = { id: incident.id, name: incident.name, type: incident.type, savedAt: updatedAt };
       const nextIndex = [meta, ...index.filter(i => i.id !== incident.id)];
@@ -3956,7 +4141,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     }, 900);
     return () => clearTimeout(saveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, ready, incidentLoaded]);
+  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, ready, incidentLoaded]);
 
   // real-time: subscribe to this incident's Firestore doc so other
   // users' changes appear here immediately, no polling needed.
@@ -3973,7 +4158,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   }, [ready, incidentLoaded, incident.id]);
 
   const startNew = () => {
-    applyBlob({ incident: blankIncident(), resources: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {} });
+    applyBlob({ incident: blankIncident(), resources: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
     setAttachments([]);
     setIncidentLoaded(true);
     setShowLib(false);
@@ -4133,6 +4318,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
               />}
+              {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
