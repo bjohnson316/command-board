@@ -2419,7 +2419,7 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments, orgChartImage }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -2434,6 +2434,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   ics209 = { ...defaultIcs209(), ...(ics209 || {}) };
   ics206 = { ...defaultIcs206(), ...(ics206 || {}) };
   logs = logs || [];
+  rehab = rehab || [];
   attachments = attachments || [];
   // Older saved incidents (or a first export before any form was
   // checked) won't have this — fall back to "everything included"
@@ -2486,6 +2487,10 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
+
+  const vitalsStr = (r) => [r.bp && `BP ${r.bp}`, r.pulse && `P ${r.pulse}`, r.rr && `R ${r.rr}`, r.spo2 && `SpO2 ${r.spo2}`, r.temp && `T ${r.temp}`].filter(Boolean).join(" ");
+  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "VITALS", "STATUS", "CLEARED", "NOTES"], [75, 45, 50, 180, 55, 50, 77],
+    rehab.map(r => [r.name, r.unit, fmtTime(r.timeIn), vitalsStr(r), r.status, r.timeCleared ? fmtTime(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
 
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
@@ -4025,7 +4030,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
               <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
