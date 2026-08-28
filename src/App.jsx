@@ -2419,7 +2419,7 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments, orgChartImage }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -2491,6 +2491,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
   if (orgLines.length === 0) push("(none entered)");
   else orgLines.forEach(l => wrapPush(L, l));
+  if (orgChartImage) L.push({ kind: "image", img: orgChartImage });
   blank();
 
   if (include("205")) {
@@ -2639,7 +2640,29 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
   const pages = [];
   let cur = [];
   let y = MARGIN_TOP - HEADER_H;
+  const CONTENT_W = PAGE_W - 2 * MARGIN_X;
+  const IMAGE_MAX_H = 380; // cap so one image can't eat an entire page
+  const IMAGE_GAP = 16;
   for (const ln of lines) {
+    if (ln.kind === "image") {
+      // Scale to fit the content width (never upscale past the
+      // image's native size), then cap the height too. Images never
+      // split across a page break — if it doesn't fit in what's left,
+      // the whole thing moves to a fresh page instead of clipping.
+      let scale = Math.min(CONTENT_W / ln.img.width, 1);
+      let displayW = ln.img.width * scale;
+      let displayH = ln.img.height * scale;
+      if (displayH > IMAGE_MAX_H) {
+        scale = IMAGE_MAX_H / ln.img.height;
+        displayH = IMAGE_MAX_H;
+        displayW = ln.img.width * scale;
+      }
+      const needed = displayH + IMAGE_GAP;
+      if (y - needed < MARGIN_BOTTOM) { pages.push(cur); cur = []; y = MARGIN_TOP; }
+      cur.push({ ...ln, y, displayW, displayH });
+      y -= needed;
+      continue;
+    }
     const lh = LH[ln.kind === "heading" ? "heading" : ln.font] || 12;
     if (y - lh < MARGIN_BOTTOM) { pages.push(cur); cur = []; y = MARGIN_TOP; }
     cur.push({ ...ln, y });
@@ -2670,6 +2693,13 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
   const attImageIds = attachmentImages.map(() => reserve());
   const attPageIds = attachmentImages.map(() => reserve());
   const attContentIds = attachmentImages.map(() => reserve());
+  // Inline images (e.g. the org chart) live inside the normal flowing
+  // pages rather than getting a dedicated page of their own — found
+  // by scanning the already-paginated lines so each gets a stable
+  // index for its XObject name/id, referenced later when drawing.
+  const inlineImageEntries = [];
+  pages.forEach(pageLines => pageLines.forEach(ln => { if (ln.kind === "image") inlineImageEntries.push(ln); }));
+  const inlineImageIds = inlineImageEntries.map(() => reserve());
 
   const offsets = {};
   const writeObj = (id, body) => {
@@ -2695,15 +2725,24 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
       push(`\nendstream`);
     });
   });
+  inlineImageEntries.forEach((ln, idx) => {
+    writeObj(inlineImageIds[idx], () => {
+      push(`<< /Type /XObject /Subtype /Image /Width ${ln.img.width} /Height ${ln.img.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${ln.img.rgb.byteLength} >>\nstream\n`);
+      push(ln.img.rgb);
+      push(`\nendstream`);
+    });
+  });
   const xobjectEntries = [
     logo ? `/Logo ${imageId} 0 R` : "",
     ...attachmentImages.map((_, idx) => `/AttImg${idx} ${attImageIds[idx]} 0 R`),
+    ...inlineImageEntries.map((_, idx) => `/InlineImg${idx} ${inlineImageIds[idx]} 0 R`),
   ].filter(Boolean).join(" ");
   const resourcesDict = xobjectEntries
     ? `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> /XObject << ${xobjectEntries} >> >>`
     : `<< /Font << /FH ${fontHId} 0 R /FHB ${fontHBId} 0 R >> >>`;
   writeObj(resourcesId, () => push(resourcesDict));
 
+  let inlineImgCounter = 0;
   pages.forEach((pageLines, i) => {
     let stream = "";
     if (i === 0) {
@@ -2725,6 +2764,15 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
 
     stream += "BT\n";
     for (const ln of pageLines) {
+      if (ln.kind === "image") {
+        stream += "ET\n";
+        const x = MARGIN_X + (CONTENT_W - ln.displayW) / 2;
+        const yBottom = ln.y - ln.displayH;
+        stream += `q ${ln.displayW.toFixed(1)} 0 0 ${ln.displayH.toFixed(1)} ${x.toFixed(1)} ${yBottom.toFixed(1)} cm /InlineImg${inlineImgCounter} Do Q\n`;
+        inlineImgCounter++;
+        stream += "BT\n";
+        continue;
+      }
       if (ln.kind === "rule") {
         stream += "ET\n";
         stream += `${GREY} RG 0.6 w ${MARGIN_X} ${(ln.y + 3).toFixed(1)} m ${MARGIN_X + ln.width} ${(ln.y + 3).toFixed(1)} l S\n`;
@@ -3004,19 +3052,18 @@ async function downloadPacketPdf(data) {
   // see the "attachments" list passed through in `data`).
   const imageAttachments = (data.attachments || []).filter(a => (a.type || "").startsWith("image/"));
   const attachmentImages = [];
-  // The org chart diagram is drawn to a canvas and embedded the same
-  // way as a photo attachment — always included (not gated by a
-  // checkbox), matching how the text org summary is always included.
+  // The org chart diagram is decoded here (this is the browser-only
+  // step) and handed to buildPacketLines as an INLINE image placed
+  // right under "9. Current Organization" — unlike attachment photos,
+  // it doesn't get a trailing page of its own. Always included, not
+  // gated by a checkbox, matching the text org summary next to it.
   const orgChartDataUri = renderOrgChartDataUri(normalizeOrg(data.org));
-  if (orgChartDataUri) {
-    const decodedChart = await loadLogoRGB(orgChartDataUri, 1400);
-    if (decodedChart) attachmentImages.push({ ...decodedChart, caption: "Organization Chart" });
-  }
+  const orgChartImage = orgChartDataUri ? await loadLogoRGB(orgChartDataUri, 1400) : null;
   for (const a of imageAttachments) {
     const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
     if (decoded) attachmentImages.push({ ...decoded, caption: a.name });
   }
-  const parts = buildSimplePdf(buildPacketLines(data), logo, { name: inc.name, started }, attachmentImages);
+  const parts = buildSimplePdf(buildPacketLines({ ...data, orgChartImage }), logo, { name: inc.name, started }, attachmentImages);
   const blob = new Blob(parts, { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
