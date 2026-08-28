@@ -539,7 +539,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
 
   const submit = () => {
     if (!f.label.trim()) return;
-    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, personnel: Number(f.personnel) || 1, assignment: f.assignment, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
+    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "" });
   };
 
@@ -655,6 +655,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
           <div>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{r.label}</div>
             <div style={{ fontSize: 11.5, color: COLORS.muted }}>{r.kind} · {r.personnel} pers.</div>
+            {r.department && <div style={{ fontSize: 10.5, color: COLORS.faint }}>{r.department}</div>}
           </div>
         </div>
         <button onClick={() => onRemove(r.id)} title="Remove" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={13} /></button>
