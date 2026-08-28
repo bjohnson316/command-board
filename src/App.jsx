@@ -3,7 +3,7 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound
+  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -441,6 +441,94 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 /* ============================================================
    TAB: RESOURCE STATUS BOARD
    ============================================================ */
+// Rename/move/delete for the Department -> Unit hierarchy. Renaming
+// uses an uncontrolled input that commits on blur/Enter rather than
+// saving on every keystroke — a rename is a single deliberate edit,
+// not something that needs a write per character typed.
+function ManageDepartmentsModal({ departments, onClose, onRenameDept, onDeleteDept, onRenameUnit, onDeleteUnit, onMoveUnit, onAddDepartment, onAddUnitUnderDepartment }) {
+  const [addingDeptFor, setAddingDeptFor] = useState(false);
+  const [addingUnitFor, setAddingUnitFor] = useState(null); // deptId or null
+  const [newValue, setNewValue] = useState("");
+
+  const commitNewDept = () => {
+    const name = newValue.trim();
+    if (name) onAddDepartment(name);
+    setAddingDeptFor(false);
+    setNewValue("");
+  };
+  const commitNewUnit = (deptId) => {
+    const name = newValue.trim();
+    if (name) onAddUnitUnderDepartment(deptId, name);
+    setAddingUnitFor(null);
+    setNewValue("");
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 540, maxHeight: "82vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 15 }}>Manage Departments & Units</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 16, lineHeight: 1.5 }}>
+          Edit a name and click away (or press Enter) to rename it. Use the dropdown next to a unit to move it to a different department.
+        </div>
+
+        {departments.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13, marginBottom: 12 }}>No departments yet.</div>}
+
+        {departments.map(d => (
+          <div key={d.id} style={{ marginBottom: 14, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+              <TextInput key={d.id + d.name} defaultValue={d.name}
+                onBlur={e => { const v = e.target.value.trim(); if (v && v !== d.name) onRenameDept(d.id, v); }}
+                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                style={{ flex: 1, fontWeight: 600 }} />
+              <button onClick={() => onDeleteDept(d.id)} title="Delete department (and its units)" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={15} /></button>
+            </div>
+
+            {d.units.map(u => (
+              <div key={u} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, paddingLeft: 14 }}>
+                <TextInput key={d.id + u} defaultValue={u}
+                  onBlur={e => { const v = e.target.value.trim(); if (v && v !== u) onRenameUnit(d.id, u, v); }}
+                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                  style={{ flex: 1, fontSize: 12.5 }} />
+                {departments.length > 1 && (
+                  <Select value={d.id} onChange={e => { if (e.target.value !== d.id) onMoveUnit(d.id, u, e.target.value); }} style={{ width: 140, fontSize: 12 }} title="Move to department">
+                    {departments.map(dd => <option key={dd.id} value={dd.id}>{dd.name}</option>)}
+                  </Select>
+                )}
+                <button onClick={() => onDeleteUnit(d.id, u)} title="Delete unit" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={13} /></button>
+              </div>
+            ))}
+
+            {addingUnitFor === d.id ? (
+              <div style={{ display: "flex", gap: 6, paddingLeft: 14, marginTop: 6 }}>
+                <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New unit name" style={{ flex: 1, fontSize: 12.5 }}
+                  onKeyDown={e => { if (e.key === "Enter") commitNewUnit(d.id); if (e.key === "Escape") setAddingUnitFor(null); }} />
+                <Btn kind="solid" onClick={() => commitNewUnit(d.id)} style={{ padding: "5px 9px", fontSize: 12 }}>Add</Btn>
+                <button onClick={() => setAddingUnitFor(null)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={13} /></button>
+              </div>
+            ) : (
+              <Btn kind="subtle" icon={Plus} onClick={() => { setAddingUnitFor(d.id); setNewValue(""); }} style={{ marginTop: 6, marginLeft: 14, padding: "4px 8px", fontSize: 11.5 }}>Add Unit</Btn>
+            )}
+          </div>
+        ))}
+
+        {addingDeptFor ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New department name" style={{ flex: 1 }}
+              onKeyDown={e => { if (e.key === "Enter") commitNewDept(); if (e.key === "Escape") setAddingDeptFor(false); }} />
+            <Btn kind="solid" onClick={commitNewDept} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingDeptFor(false)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ) : (
+          <Btn kind="subtle" icon={Plus} onClick={() => { setAddingDeptFor(true); setNewValue(""); }}>Add Department</Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset }) {
   const [f, setF] = useState({ label: "", kind: RESOURCE_KINDS[0], personnel: 1, assignment: "" });
   const [deptId, setDeptId] = useState("");
@@ -599,13 +687,14 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset }) {
+function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, assignmentPresets, onSaveAssignmentPreset }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
   // drag-and-drop, because HTML5 DnD is unreliable on touch devices —
   // this app needs to work on iPads and phones, not just desktop mice.
   const [drag, setDrag] = useState(null); // { id, x, y, overStatus }
+  const [showManageDepts, setShowManageDepts] = useState(false);
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
@@ -640,9 +729,22 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Panel title="Check In Resource" icon={Truck}>
+      <Panel title="Check In Resource" icon={Truck} right={<Btn kind="subtle" icon={Settings} onClick={() => setShowManageDepts(true)} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Departments</Btn>}>
         <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} />
       </Panel>
+      {showManageDepts && (
+        <ManageDepartmentsModal
+          departments={departments}
+          onClose={() => setShowManageDepts(false)}
+          onRenameDept={onRenameDepartment}
+          onDeleteDept={onDeleteDepartment}
+          onRenameUnit={onRenameUnit}
+          onDeleteUnit={onDeleteUnit}
+          onMoveUnit={onMoveUnit}
+          onAddDepartment={onAddDepartment}
+          onAddUnitUnderDepartment={onAddUnitUnderDepartment}
+        />
+      )}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
           const items = resources.filter(r => r.status === status);
@@ -3022,6 +3124,39 @@ function AppInner({ onLock }) {
     setPresets(next);
     savePresets(next);
   };
+  const renameDepartment = (deptId, newName) => {
+    const next = { ...presets, departments: presets.departments.map(d => d.id === deptId ? { ...d, name: newName } : d) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const deleteDepartment = (deptId) => {
+    const next = { ...presets, departments: presets.departments.filter(d => d.id !== deptId) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const renameUnit = (deptId, oldName, newName) => {
+    const next = { ...presets, departments: presets.departments.map(d => d.id === deptId ? { ...d, units: d.units.map(u => u === oldName ? newName : u) } : d) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const deleteUnit = (deptId, unitName) => {
+    const next = { ...presets, departments: presets.departments.map(d => d.id === deptId ? { ...d, units: d.units.filter(u => u !== unitName) } : d) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const moveUnit = (fromDeptId, unitName, toDeptId) => {
+    if (fromDeptId === toDeptId) return;
+    const next = {
+      ...presets,
+      departments: presets.departments.map(d => {
+        if (d.id === fromDeptId) return { ...d, units: d.units.filter(u => u !== unitName) };
+        if (d.id === toDeptId && !d.units.includes(unitName)) return { ...d, units: [...d.units, unitName] };
+        return d;
+      }),
+    };
+    setPresets(next);
+    savePresets(next);
+  };
   const saveObjectivePreset = async (objective) => {
     if (!objective || presets.objectives.includes(objective)) return;
     const next = { ...presets, objectives: [...presets.objectives, objective] };
@@ -3258,7 +3393,7 @@ function AppInner({ onLock }) {
           ) : (
             <>
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
-              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment} assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset} />}
+              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment} onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
