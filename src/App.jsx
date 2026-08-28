@@ -2786,6 +2786,187 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
 // offscreen canvas — needed because the hand-built PDF above embeds
 // the image as a raw DeviceRGB stream rather than relying on a PDF
 // library to handle PNG decoding for us.
+/* ============================================================
+   ORG CHART -> PDF: draws the same tree the on-screen diagram shows
+   onto an offscreen canvas, then feeds it through the same
+   image-embedding pipeline built for attachment photos (see
+   loadLogoRGB / the attachmentImages param on buildSimplePdf) —
+   the hand-built PDF writer has no way to render an HTML/CSS
+   flowchart directly, so rendering it as an image is the only path.
+   ============================================================ */
+const ORG_BOX_W = 150, ORG_BOX_H = 56, ORG_GAP_X = 18, ORG_LEVEL_H = 88;
+
+// Recursive layout: positions a node's box and, if it has children,
+// their boxes and the connector lines to them — centering each parent
+// over the full width of its children's combined subtrees (not just
+// their box positions), so multi-level branches stay properly aligned.
+function layoutOrgTree(node, depth) {
+  if (!node.children || node.children.length === 0) {
+    return { width: ORG_BOX_W, maxDepth: depth, boxes: [{ node, x: 0, y: depth * ORG_LEVEL_H }], lines: [] };
+  }
+  let childX = 0;
+  const childResults = [];
+  for (const child of node.children) {
+    const r = layoutOrgTree(child, depth + 1);
+    childResults.push({ r, offsetX: childX });
+    childX += r.width + ORG_GAP_X;
+  }
+  const totalChildWidth = childX - ORG_GAP_X;
+  const width = Math.max(ORG_BOX_W, totalChildWidth);
+  const childrenStartX = (width - totalChildWidth) / 2;
+  const boxes = [{ node, x: (width - ORG_BOX_W) / 2, y: depth * ORG_LEVEL_H }];
+  const lines = [];
+  let maxDepth = depth;
+  const parentCenterX = width / 2;
+  const parentBottomY = depth * ORG_LEVEL_H + ORG_BOX_H;
+  for (const { r, offsetX } of childResults) {
+    const shiftedBoxes = r.boxes.map(b => ({ ...b, x: b.x + childrenStartX + offsetX }));
+    const shiftedLines = r.lines.map(l => ({ x1: l.x1 + childrenStartX + offsetX, y1: l.y1, x2: l.x2 + childrenStartX + offsetX, y2: l.y2 }));
+    boxes.push(...shiftedBoxes);
+    lines.push(...shiftedLines);
+    maxDepth = Math.max(maxDepth, r.maxDepth);
+    const childBoxX = shiftedBoxes[0].x + ORG_BOX_W / 2;
+    const childBoxY = shiftedBoxes[0].y;
+    // T-connector: down from parent, across, down into the child —
+    // matches the on-screen diagram's connector style.
+    lines.push({ x1: parentCenterX, y1: parentBottomY, x2: parentCenterX, y2: parentBottomY + 15 });
+    lines.push({ x1: parentCenterX, y1: parentBottomY + 15, x2: childBoxX, y2: parentBottomY + 15 });
+    lines.push({ x1: childBoxX, y1: parentBottomY + 15, x2: childBoxX, y2: childBoxY });
+  }
+  return { width, maxDepth, boxes, lines };
+}
+
+// Combines IC/Deputy IC, the Command Staff row, and each Section
+// Chief's (possibly deep) subtree into one full-chart layout.
+function layoutFullOrgChart(org) {
+  const csBoxes = org.commandStaff.map((cs, i) => ({ node: cs, x: i * (ORG_BOX_W + ORG_GAP_X), y: 0 }));
+  const csWidth = org.commandStaff.length > 0 ? org.commandStaff.length * ORG_BOX_W + (org.commandStaff.length - 1) * ORG_GAP_X : 0;
+
+  const sectionResults = org.sections.map(s => layoutOrgTree(s, 0));
+  const groups = [];
+  if (csWidth > 0) groups.push({ width: csWidth, boxes: csBoxes, lines: [], maxDepth: 0 });
+  groups.push(...sectionResults);
+
+  const GROUP_GAP = 40;
+  let curX = 0;
+  const allBoxes = [];
+  const allLines = [];
+  let maxDepth = 0;
+  const groupCenters = [];
+  for (const g of groups) {
+    allBoxes.push(...g.boxes.map(b => ({ ...b, x: b.x + curX })));
+    allLines.push(...(g.lines || []).map(l => ({ x1: l.x1 + curX, y1: l.y1, x2: l.x2 + curX, y2: l.y2 })));
+    maxDepth = Math.max(maxDepth, g.maxDepth);
+    groupCenters.push(curX + g.width / 2);
+    curX += g.width + GROUP_GAP;
+  }
+  const rowWidth = groups.length > 0 ? curX - GROUP_GAP : 0;
+
+  const hasDeputy = !!org.deputyIc;
+  const icGroupWidth = hasDeputy ? ORG_BOX_W * 2 + ORG_GAP_X : ORG_BOX_W;
+  const totalWidth = Math.max(rowWidth, icGroupWidth);
+  const rowOffsetX = (totalWidth - rowWidth) / 2;
+  const icOffsetX = (totalWidth - icGroupWidth) / 2;
+
+  const IC_ROW_H = ORG_BOX_H + 70; // IC box height + connector space down to the next row
+  const finalBoxes = allBoxes.map(b => ({ ...b, x: b.x + rowOffsetX, y: b.y + IC_ROW_H }));
+  const finalLines = allLines.map(l => ({ x1: l.x1 + rowOffsetX, y1: l.y1 + IC_ROW_H, x2: l.x2 + rowOffsetX, y2: l.y2 + IC_ROW_H }));
+
+  const icBoxes = [{ node: { title: "Incident Commander", name: org.ic }, x: icOffsetX, y: 0, isRoot: true }];
+  if (hasDeputy) icBoxes.push({ node: { title: "Deputy IC", name: org.deputyIc }, x: icOffsetX + ORG_BOX_W + ORG_GAP_X, y: 0, isRoot: true });
+
+  const icCenterX = icOffsetX + icGroupWidth / 2;
+  const barY = ORG_BOX_H + 35;
+  const connectorLines = [{ x1: icCenterX, y1: ORG_BOX_H, x2: icCenterX, y2: barY }];
+  if (groupCenters.length > 0) {
+    const firstCenter = groupCenters[0] + rowOffsetX;
+    const lastCenter = groupCenters[groupCenters.length - 1] + rowOffsetX;
+    connectorLines.push({ x1: firstCenter, y1: barY, x2: lastCenter, y2: barY });
+    for (const gc of groupCenters) {
+      const x = gc + rowOffsetX;
+      connectorLines.push({ x1: x, y1: barY, x2: x, y2: barY + 35 });
+    }
+  }
+
+  return {
+    boxes: [...icBoxes, ...finalBoxes],
+    lines: [...connectorLines, ...finalLines],
+    width: totalWidth,
+    height: IC_ROW_H + (maxDepth + 1) * ORG_LEVEL_H,
+  };
+}
+
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "";
+  const lines = [];
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  lines.slice(0, 2).forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+  return lines.length;
+}
+
+// Renders the layout to an offscreen canvas and returns a PNG data
+// URI — plain black/grey ink on white, matching print conventions
+// (the on-screen dark theme's colors aren't meant for paper).
+function renderOrgChartDataUri(org) {
+  const hasAnyContent = org.ic || org.deputyIc || org.commandStaff.some(c => c.name) || org.sections.some(s => s.name || (s.children && s.children.length));
+  if (!hasAnyContent) return null;
+  const layout = layoutFullOrgChart(org);
+  const PADDING = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(layout.width + PADDING * 2);
+  canvas.height = Math.ceil(layout.height + PADDING * 2);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = "#9AA0A6";
+  ctx.lineWidth = 1.5;
+  layout.lines.forEach(l => {
+    ctx.beginPath();
+    ctx.moveTo(l.x1 + PADDING, l.y1 + PADDING);
+    ctx.lineTo(l.x2 + PADDING, l.y2 + PADDING);
+    ctx.stroke();
+  });
+
+  layout.boxes.forEach(b => {
+    const x = b.x + PADDING, y = b.y + PADDING;
+    ctx.fillStyle = b.isRoot ? "#F0F0F0" : "#FFFFFF";
+    ctx.strokeStyle = b.isRoot ? "#96690F" : "#9AA0A6";
+    ctx.lineWidth = b.isRoot ? 2 : 1.5;
+    const r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + ORG_BOX_W, y, x + ORG_BOX_W, y + ORG_BOX_H, r);
+    ctx.arcTo(x + ORG_BOX_W, y + ORG_BOX_H, x, y + ORG_BOX_H, r);
+    ctx.arcTo(x, y + ORG_BOX_H, x, y, r);
+    ctx.arcTo(x, y, x + ORG_BOX_W, y, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#96690F";
+    ctx.font = "bold 10px Arial, sans-serif";
+    wrapCanvasText(ctx, (b.node.title || "").toUpperCase(), x + ORG_BOX_W / 2, y + 16, ORG_BOX_W - 12, 11);
+
+    ctx.fillStyle = "#191C1F";
+    ctx.font = "12px Arial, sans-serif";
+    ctx.fillText(b.node.name || "(vacant)", x + ORG_BOX_W / 2, y + ORG_BOX_H - 12);
+  });
+
+  return canvas.toDataURL("image/png");
+}
+
 function loadLogoRGB(dataUri, maxDim = 130) {
   return new Promise((resolve) => {
     try {
@@ -2823,6 +3004,14 @@ async function downloadPacketPdf(data) {
   // see the "attachments" list passed through in `data`).
   const imageAttachments = (data.attachments || []).filter(a => (a.type || "").startsWith("image/"));
   const attachmentImages = [];
+  // The org chart diagram is drawn to a canvas and embedded the same
+  // way as a photo attachment — always included (not gated by a
+  // checkbox), matching how the text org summary is always included.
+  const orgChartDataUri = renderOrgChartDataUri(normalizeOrg(data.org));
+  if (orgChartDataUri) {
+    const decodedChart = await loadLogoRGB(orgChartDataUri, 1400);
+    if (decodedChart) attachmentImages.push({ ...decodedChart, caption: "Organization Chart" });
+  }
   for (const a of imageAttachments) {
     const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
     if (decoded) attachmentImages.push({ ...decoded, caption: a.name });
