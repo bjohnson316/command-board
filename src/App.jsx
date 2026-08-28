@@ -2419,6 +2419,26 @@ function heading(L, text) {
   L.push({ kind: "heading", text });
 }
 
+// Compact time formatters for the PDF specifically — the on-screen
+// fmtTime() includes seconds (e.g. "10:58:32 PM", 11 chars), which is
+// fine in the app's flexible UI but too wide for several fixed-width
+// table columns in the hand-built PDF (fitText truncates rather than
+// wrapping/overflowing, so a too-narrow column silently clips the
+// timestamp — e.g. down to "10:58:..."). Dropping to minute precision
+// here keeps every timestamp fully visible without needing every
+// column sized to the exact worst case down to the pixel.
+const fmtTimeShort = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+// The Resource Summary's "Date/Time Ordered" field is a raw
+// datetime-local input value ("YYYY-MM-DDTHH:MM", 16 characters) —
+// reformatted to "MM/DD HH:MM" (11 characters), which is both shorter
+// and more readable in a table cell than the ISO-ish raw string.
+const fmtDateTimeShort = (raw) => {
+  if (!raw) return "-";
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw; // not a parseable datetime-local value — show as-is rather than hide it
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+};
+
 function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
@@ -2482,15 +2502,15 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
   blank();
 
-  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
-    (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
+  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 70, 60, 55, 163],
+    (incident.resourceOrders || []).map(r => [r.resource, r.identifier, fmtDateTimeShort(r.ordered), r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
 
   const vitalsStr = (r) => [r.bp && `BP ${r.bp}`, r.pulse && `P ${r.pulse}`, r.rr && `R ${r.rr}`, r.spo2 && `SpO2 ${r.spo2}`, r.temp && `T ${r.temp}`].filter(Boolean).join(" ");
-  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "VITALS", "STATUS", "CLEARED", "NOTES"], [75, 45, 50, 180, 55, 50, 77],
-    rehab.map(r => [r.name, r.unit, fmtTime(r.timeIn), vitalsStr(r), r.status, r.timeCleared ? fmtTime(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
+  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "VITALS", "STATUS", "CLEARED", "NOTES"], [60, 40, 55, 185, 60, 55, 77],
+    rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), vitalsStr(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
 
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
@@ -2604,8 +2624,8 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   } else {
     logs.forEach(l => {
       push(`${l.name || "Unnamed"} - ${l.position || "-"} (${l.agency || "-"})`, "HB", 9);
-      L.push(...tableLines(["TIME", "ACTIVITY"], [60, 440],
-        l.entries.slice().sort((a, b) => new Date(a.time) - new Date(b.time)).map(e => [fmtTime(e.time), e.text])));
+      L.push(...tableLines(["TIME", "ACTIVITY"], [70, 430],
+        l.entries.slice().sort((a, b) => new Date(a.time) - new Date(b.time)).map(e => [fmtTimeShort(e.time), e.text])));
     });
   }
   }
