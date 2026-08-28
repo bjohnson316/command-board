@@ -3,7 +3,7 @@ import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
-  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings
+  Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -11,7 +11,7 @@ import {
   loadPresets, savePresets,
   loadAttachments, saveAttachment, deleteAttachment, deleteAllAttachments,
 } from "./store";
-import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
+import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
 import PinGate from "./PinGate.jsx";
 import { sha256 } from "./pin";
 
@@ -387,7 +387,7 @@ function Btn({ children, onClick, kind = "ghost", icon: Icon, style, type = "but
     ghost: { background: "transparent", color: COLORS.text },
     solid: { background: COLORS.red, color: "#fff", border: `1px solid ${COLORS.red}` },
     subtle: { background: COLORS.panel2, color: COLORS.text },
-    danger: { background: "transparent", color: "#E4796B", border: `1px solid #5A2B24` },
+    danger: { background: "transparent", color: COLORS.dangerText, border: `1px solid ${COLORS.dangerBorder}` },
   };
   return (
     <button type={type} disabled={disabled} onClick={onClick} title={title} style={{ ...base, ...kinds[kind], ...style }}>
@@ -2186,7 +2186,7 @@ function TabAttachments({ attachments, onUpload, onDelete }) {
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 12, lineHeight: 1.5 }}>
           Photos and documents attached to this incident — included in Print/Export (photos embed directly as pages; other file types are listed by name). Limit {fmtBytes(MAX_ATTACHMENT_BYTES)} per file.
         </div>
-        {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        {error && <div style={{ color: COLORS.dangerText, fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         {attachments.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint }}>No attachments yet.</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
           {attachments.map(a => {
@@ -2938,7 +2938,7 @@ function ChangePinModal({ onClose }) {
               <TextInput type="password" inputMode="numeric" value={confirm} onChange={e => setConfirm(e.target.value.replace(/\D/g, ""))} maxLength={12}
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </Field>
-            {error && <div style={{ color: "#E4796B", fontSize: 12 }}>{error}</div>}
+            {error && <div style={{ color: COLORS.dangerText, fontSize: 12 }}>{error}</div>}
             <Btn kind="solid" onClick={submit} disabled={status === "saving"} style={{ justifyContent: "center" }}>
               {status === "saving" ? "Saving…" : "Save New PIN"}
             </Btn>
@@ -2995,7 +2995,7 @@ function ChangeArchivePasswordModal({ onClose }) {
               <TextInput type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </Field>
-            {error && <div style={{ color: "#E4796B", fontSize: 12 }}>{error}</div>}
+            {error && <div style={{ color: COLORS.dangerText, fontSize: 12 }}>{error}</div>}
             <Btn kind="solid" onClick={submit} disabled={status === "saving"} style={{ justifyContent: "center" }}>
               {status === "saving" ? "Saving…" : "Save New Password"}
             </Btn>
@@ -3059,7 +3059,7 @@ function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
             <Btn kind="solid" onClick={submit} disabled={checking} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
               {checking ? "Checking…" : "Confirm"}
             </Btn>
-            {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
+            {error && <div style={{ color: COLORS.dangerText, fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
           </>
         )}
       </div>
@@ -3212,7 +3212,7 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
               <Btn kind="solid" onClick={phase === "setup" ? doSetup : doUnlock} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
                 {phase === "setup" ? "Set Password & Continue" : "Unlock"}
               </Btn>
-              {error && <div style={{ color: "#E4796B", fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
+              {error && <div style={{ color: COLORS.dangerText, fontSize: 12.5, marginTop: 10, textAlign: "center" }}>{error}</div>}
             </>
           )}
 
@@ -3265,21 +3265,25 @@ const TABS = [
 function GlobalStyles() {
   return (
     <style>{`
+      ${THEME_CSS}
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
       * { box-sizing: border-box; }
       html, body, #root { margin: 0; padding: 0; min-height: 100%; background: ${COLORS.bg}; }
       select { -webkit-appearance: none; }
       input:focus, textarea:focus, select:focus { border-color: ${COLORS.amber} !important; }
-      /* Native date/time picker icons default to a dark glyph that's
-         hard to see on our dark inputs — invert so it reads clearly. */
+      /* Native date/time picker icons default to a dark glyph — fine
+         against our dark theme's inputs, but wrong (invisible) against
+         light theme's, so both the color-scheme and the icon invert
+         follow the active theme via CSS variables instead of being
+         hardcoded to dark. */
       input[type="date"]::-webkit-calendar-picker-indicator,
       input[type="time"]::-webkit-calendar-picker-indicator,
       input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-        filter: invert(1);
+        filter: invert(var(--cb-picker-invert));
         cursor: pointer;
       }
       input[type="date"], input[type="time"], input[type="datetime-local"] {
-        color-scheme: dark;
+        color-scheme: var(--cb-picker-scheme);
       }
       ::-webkit-scrollbar { height: 8px; width: 8px; }
       ::-webkit-scrollbar-thumb { background: ${COLORS.line}; border-radius: 4px; }
@@ -3293,11 +3297,24 @@ function GlobalStyles() {
 }
 
 export default function App() {
+  // Lives above PinGate (not inside AppInner) so the chosen theme is
+  // already applied — via the data-theme attribute on <html>, which
+  // every COLORS.xxx reference resolves through via CSS variables —
+  // before the lock screen itself even renders, not just after unlock.
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem("cb-theme") || "dark"; } catch { return "dark"; }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("cb-theme", theme); } catch { /* private browsing, etc. — theme just won't persist */ }
+  }, [theme]);
+  const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
+
   return (
     <>
       <GlobalStyles />
       <PinGate>
-        {(lock) => <AppInner onLock={lock} />}
+        {(lock) => <AppInner onLock={lock} theme={theme} toggleTheme={toggleTheme} />}
       </PinGate>
     </>
   );
@@ -3322,7 +3339,7 @@ function useOnlineStatus() {
   return online;
 }
 
-function AppInner({ onLock }) {
+function AppInner({ onLock, theme, toggleTheme }) {
   const online = useOnlineStatus();
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("201");
@@ -3773,6 +3790,7 @@ function AppInner({ onLock }) {
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, logs, formsUsed, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
+              <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
               <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
