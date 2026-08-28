@@ -2400,7 +2400,15 @@ function tableLines(headers, colWidths, rows, title) {
   const totalWidth = acc;
   const toRow = (cells, font, size) => ({
     kind: "row", font, size,
-    cells: cells.map((c, i) => ({ text: fitText(c, font, size, colWidths[i] - 6), x: xOffsets[i] })),
+    // A cell is normally a plain string (truncated to fit via
+    // fitText, as before). It can also be an array of {text, bold}
+    // segments for mixed-weight text within one cell (e.g. bold
+    // vitals labels with regular-weight values) — segmented cells
+    // skip fitText, since truncating mid-segment isn't meaningful;
+    // callers using this are expected to size the column generously.
+    cells: cells.map((c, i) => Array.isArray(c)
+      ? { segments: c, x: xOffsets[i] }
+      : { text: fitText(c, font, size, colWidths[i] - 6), x: xOffsets[i] }),
   });
   lines.push(toRow(headers, "HB", 9));
   lines.push({ kind: "rule", width: totalWidth, color: "light" });
@@ -2502,15 +2510,28 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
   blank();
 
-  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 70, 60, 55, 163],
+  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 70, 60, 55, 220],
     (incident.resourceOrders || []).map(r => [r.resource, r.identifier, fmtDateTimeShort(r.ordered), r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
 
-  L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
+  L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 110, 45, 80, 220],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
 
-  const vitalsStr = (r) => [r.bp && `BP ${r.bp}`, r.pulse && `P ${r.pulse}`, r.rr && `R ${r.rr}`, r.spo2 && `SpO2 ${r.spo2}`, r.temp && `T ${r.temp}`].filter(Boolean).join(" ");
-  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "VITALS", "STATUS", "CLEARED", "NOTES"], [60, 40, 55, 185, 60, 55, 77],
-    rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), vitalsStr(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
+  const vitalsSegments = (r) => {
+    const segs = [];
+    if (r.bp) segs.push({ text: "BP ", bold: true }, { text: `${r.bp} `, bold: false });
+    if (r.pulse) segs.push({ text: "P ", bold: true }, { text: `${r.pulse} `, bold: false });
+    if (r.rr) segs.push({ text: "R ", bold: true }, { text: `${r.rr} `, bold: false });
+    if (r.spo2) segs.push({ text: "SpO2 ", bold: true }, { text: `${r.spo2} `, bold: false });
+    if (r.temp) segs.push({ text: "T ", bold: true }, { text: `${r.temp}`, bold: false });
+    return segs;
+  };
+  // Frozen duration for cleared entries (time-in to time-cleared,
+  // matching the on-screen clock's freeze behavior) — for anyone
+  // still in rehab at export time, this is elapsed-so-far as of the
+  // moment the report was generated, since a PDF is a snapshot.
+  const rehabDuration = (r) => r.timeIn ? elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : Date.now()) : "-";
+  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "DURATION", "VITALS", "STATUS", "CLEARED", "NOTES"], [160, 40, 50, 55, 190, 65, 50, 102],
+    rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), rehabDuration(r), vitalsSegments(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
 
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
@@ -2523,7 +2544,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     heading(L, "ICS-205 · Incident Radio Communications Plan");
     push(`Date/Time Prepared: ${comms.dateTimePrepared || "-"}   Operational Period: ${comms.opFrom || "-"} to ${comms.opTo || "-"}`, "H", 9);
     blank();
-    L.push(...tableLines(["ZN/GRP", "CH#", "FUNCTION", "CHANNEL NAME", "ASSIGN", "RX FREQ", "TX FREQ", "MODE", "REMARKS"], [40, 30, 65, 90, 60, 65, 65, 35, 80],
+    L.push(...tableLines(["ZN/GRP", "CH#", "FUNCTION", "CHANNEL NAME", "ASSIGN", "RX FREQ", "TX FREQ", "MODE", "REMARKS"], [45, 35, 75, 110, 80, 75, 75, 40, 160],
       comms.rows.map(c => [c.zoneGroup, c.chNum, c.func, c.channelName, c.assignment, c.rxFreq, c.txFreq, c.mode, c.remarks])));
     if (comms.specialInstructions) {
       push("Special Instructions:", "HB", 9);
@@ -2537,7 +2558,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     heading(L, "ICS-215A · Incident Action Plan Safety Analysis");
     push(`Operational Period: ${safety.opFrom || "-"} to ${safety.opTo || "-"}`, "H", 9);
     blank();
-    L.push(...tableLines(["BRANCH", "DIV/GRP", "HAZARDS", "MITIGATIONS"], [60, 70, 175, 175],
+    L.push(...tableLines(["BRANCH", "DIV/GRP", "HAZARDS", "MITIGATIONS"], [70, 90, 270, 270],
       safety.rows.map(r => [r.branch, r.division, r.hazards, r.mitigations])));
     push(`Prepared By: ${safety.preparedBy || "-"}   Position: ${safety.position || "-"}`);
     push(`Signature: ${safety.signature || "-"}   Date/Time: ${safety.dateTime || "-"}`);
@@ -2604,11 +2625,11 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 
   if (include("206")) {
     heading(L, "ICS-206 · Medical Plan");
-    L.push(...tableLines(["STATION", "LOCATION", "CONTACT", "PARAMEDIC"], [110, 150, 150, 90],
+    L.push(...tableLines(["STATION", "LOCATION", "CONTACT", "PARAMEDIC"], [140, 220, 220, 100],
       ics206.aidStations.map(r => [r.name, r.location, r.contact, r.paramedic]), "Medical Aid Stations"));
-    L.push(...tableLines(["SERVICE", "LOCATION", "CONTACT", "LEVEL"], [130, 130, 130, 80],
+    L.push(...tableLines(["SERVICE", "LOCATION", "CONTACT", "LEVEL"], [170, 190, 190, 100],
       ics206.ambulances.map(r => [r.name, r.location, r.contact, r.level]), "Ambulance Services"));
-    L.push(...tableLines(["HOSPITAL", "ADDRESS", "TRAVEL AIR", "TRAVEL GRND", "TRAUMA", "BURN", "HELIPAD"], [100, 140, 65, 70, 60, 50, 60],
+    L.push(...tableLines(["HOSPITAL", "ADDRESS", "TRAVEL AIR", "TRAVEL GRND", "TRAUMA", "BURN", "HELIPAD"], [140, 240, 75, 85, 70, 55, 65],
       ics206.hospitals.map(r => [r.name, r.address, r.travelAir, r.travelGround, r.trauma === "Yes" ? `Yes (${r.traumaLevel || "?"})` : "No", r.burn, r.helipad]), "Hospitals"));
     push(`Aviation Assets Utilized for Rescue: ${ics206.aviationAssets ? "Yes" : "No"}`, "H", 9);
   push("Special Medical Emergency Procedures:", "HB", 9);
@@ -2624,7 +2645,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   } else {
     logs.forEach(l => {
       push(`${l.name || "Unnamed"} - ${l.position || "-"} (${l.agency || "-"})`, "HB", 9);
-      L.push(...tableLines(["TIME", "ACTIVITY"], [70, 430],
+      L.push(...tableLines(["TIME", "ACTIVITY"], [80, 620],
         l.entries.slice().sort((a, b) => new Date(a.time) - new Date(b.time)).map(e => [fmtTimeShort(e.time), e.text])));
     });
   }
@@ -2633,7 +2654,7 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   const nonImageAttachments = (attachments || []).filter(a => !(a.type || "").startsWith("image/"));
   if (nonImageAttachments.length > 0) {
     heading(L, "Attached Documents");
-    L.push(...tableLines(["FILE NAME", "TYPE", "SIZE"], [280, 130, 100],
+    L.push(...tableLines(["FILE NAME", "TYPE", "SIZE"], [400, 200, 112],
       nonImageAttachments.map(a => [a.name, a.type || "unknown", `${((a.size || 0) / 1024).toFixed(0)} KB`])));
   }
   return L;
@@ -2645,7 +2666,13 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
 // gets mangled by UTF-8 re-encoding when passed to Blob — binary data
 // has to travel as an actual typed array, not characters in a string.
 function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
-  const PAGE_W = 612, PAGE_H = 792, MARGIN_X = 40, MARGIN_BOTTOM = 46;
+  // Landscape — swapped from the portrait 612x792 US Letter default —
+  // gives tables meaningfully more horizontal room (content width goes
+  // from ~532pt to ~712pt) at the cost of shorter pages, so text-heavy
+  // sections paginate a bit more often. Every width below is computed
+  // from PAGE_W/CONTENT_W rather than hardcoded, so this is the only
+  // place orientation needs to change.
+  const PAGE_W = 792, PAGE_H = 612, MARGIN_X = 40, MARGIN_BOTTOM = 46;
   // Header layout computed once, up front, so pagination (which needs
   // to know how much vertical space the header eats on page 1) and the
   // actual per-page drawing use the exact same numbers — previously
@@ -2666,7 +2693,7 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
   let cur = [];
   let y = MARGIN_TOP - HEADER_H;
   const CONTENT_W = PAGE_W - 2 * MARGIN_X;
-  const IMAGE_MAX_H = 380; // cap so one image can't eat an entire page
+  const IMAGE_MAX_H = 300; // cap so one image can't eat an entire page (landscape pages are shorter, so this is smaller than it'd be in portrait)
   const IMAGE_GAP = 16;
   for (const ln of lines) {
     if (ln.kind === "image") {
@@ -2813,6 +2840,19 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
       }
       if (ln.kind === "row") {
         for (const cell of ln.cells) {
+          if (cell.segments) {
+            // Draw each segment left-to-right, switching font per
+            // segment and advancing x by the same average-char-width
+            // estimate fitText uses elsewhere, so bold and regular
+            // runs sit flush against each other with no visible gap.
+            let curX = MARGIN_X + cell.x;
+            for (const seg of cell.segments) {
+              const segFontKey = seg.bold ? "FHB" : "FH";
+              stream += `/${segFontKey} ${ln.size} Tf\n1 0 0 1 ${curX.toFixed(1)} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(seg.text)}) Tj\n`;
+              curX += seg.text.length * ln.size * (AVG_CHAR_W[seg.bold ? "HB" : "H"] || 0.5);
+            }
+            continue;
+          }
           const fontKey = ln.font === "HB" ? "FHB" : "FH";
           stream += `/${fontKey} ${ln.size} Tf\n1 0 0 1 ${MARGIN_X + cell.x} ${ln.y.toFixed(1)} Tm\n(${pdfEscape(cell.text)}) Tj\n`;
         }
