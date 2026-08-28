@@ -1577,21 +1577,24 @@ function TabICSForms(props) {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Forms in Use" icon={CheckCircle2}>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Check the forms this incident is actually using — only checked forms are included in the Print/Export report. Click a form's name to open and edit it below.
+          Check the additional forms this incident is using — they're included in Print/Export alongside the always-included Tactical Worksheet info. Click a form's name to open and edit it below.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {ICS_FORM_OPTIONS.map(o => {
             const isSelected = selected === o.k;
             const isUsed = !!formsUsed[o.k];
+            const alwaysIncluded = o.k === "201full";
             return (
               <div key={o.k} style={{
                 display: "flex", alignItems: "center", gap: 7, padding: "7px 11px", borderRadius: 5,
                 background: isSelected ? COLORS.panel2 : "transparent",
                 border: `1px solid ${isSelected ? COLORS.amber : COLORS.line}`,
               }}>
-                <input type="checkbox" checked={isUsed} onChange={() => toggleFormUsed(o.k)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
-                <span onClick={() => setSelected(o.k)} style={{ fontSize: 12.5, cursor: "pointer", color: isUsed ? COLORS.text : COLORS.muted, whiteSpace: "nowrap" }}>
-                  {o.label}
+                {alwaysIncluded
+                  ? <CheckCircle2 size={16} color={COLORS.muted} style={{ flexShrink: 0 }} />
+                  : <input type="checkbox" checked={isUsed} onChange={() => toggleFormUsed(o.k)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />}
+                <span onClick={() => setSelected(o.k)} style={{ fontSize: 12.5, cursor: "pointer", color: alwaysIncluded || isUsed ? COLORS.text : COLORS.muted, whiteSpace: "nowrap" }}>
+                  {o.label}{alwaysIncluded && <span style={{ color: COLORS.faint, fontSize: 11 }}> (always included)</span>}
                 </span>
               </div>
             );
@@ -1937,8 +1940,12 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   // Older saved incidents (or a first export before any form was
   // checked) won't have this — fall back to "everything included"
   // rather than silently producing an empty packet.
-  const used = formsUsed && Object.keys(formsUsed).length > 0 ? formsUsed : null;
-  const include = (key) => !used || !!used[key];
+  // Strict: a form is included only if its checkbox is actually
+  // checked. No "include everything" fallback when nothing's been
+  // checked — an untouched checklist means only the always-on
+  // Tactical Worksheet / Resource Board / Org Chart content exports,
+  // not every optional ICS form by default.
+  const include = (key) => !!(formsUsed && formsUsed[key]);
   const L = [];
   const push = (text, font = "H", size = 9) => L.push({ kind: "text", text, font, size });
   const blank = () => push("");
@@ -1950,33 +1957,34 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   push(`Conditions: ${incident.conditions || "-"}`, "H", 10);
   blank();
 
-  if (include("201full")) {
-    heading(L, "ICS-201 · Incident Briefing");
-    push(`Date/Time Initiated: ${incident.dateInitiated || "-"} ${incident.timeInitiated || ""}`, "H", 9);
-    blank();
-    push("Situation Summary and Health/Safety Briefing:", "HB", 9);
-    wrapPush(L, incident.situation);
-    blank();
-    push("Objectives:", "HB", 9);
-    const objs = incident.objectives.filter(Boolean);
-    if (objs.length === 0) push("(none entered)");
-    else objs.forEach((o, i) => wrapPush(L, `${i + 1}. ${o}`));
-    blank();
-    push("Current and Planned Actions, Strategies, and Tactics:", "HB", 9);
-    const strategyLabels = [["strategyOffensive", "Offensive"], ["strategyDefensive", "Defensive"], ["strategyTransitional", "Transitional"], ["strategyInvestigative", "Investigative"]]
-      .filter(([key]) => incident[key]).map(([, label]) => label);
-    push(`Strategy: ${strategyLabels.length ? strategyLabels.join(", ") : "(none checked)"}`, "H", 9);
-    const actionsWithText = (incident.actionsLog || []).filter(a => a.time || a.actions);
-    if (actionsWithText.length === 0) push("(none entered)");
-    else actionsWithText.forEach(a => wrapPush(L, `${a.time || "-"}: ${a.actions}`));
-    blank();
-    push(`Prepared By: ${incident.preparedBy || "-"}   Position: ${incident.prepPosition || "-"}`, "H", 9);
-    push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
-    blank();
+  // Always included, not gated by a checkbox — this is the Tactical
+  // Worksheet's own data (same underlying incident fields as the full
+  // ICS-201 form), not an optional add-on form like HazMat or Medical.
+  heading(L, "ICS-201 · Incident Briefing");
+  push(`Date/Time Initiated: ${incident.dateInitiated || "-"} ${incident.timeInitiated || ""}`, "H", 9);
+  blank();
+  push("Situation Summary and Health/Safety Briefing:", "HB", 9);
+  wrapPush(L, incident.situation);
+  blank();
+  push("Objectives:", "HB", 9);
+  const objs = incident.objectives.filter(Boolean);
+  if (objs.length === 0) push("(none entered)");
+  else objs.forEach((o, i) => wrapPush(L, `${i + 1}. ${o}`));
+  blank();
+  push("Current and Planned Actions, Strategies, and Tactics:", "HB", 9);
+  const strategyLabels = [["strategyOffensive", "Offensive"], ["strategyDefensive", "Defensive"], ["strategyTransitional", "Transitional"], ["strategyInvestigative", "Investigative"]]
+    .filter(([key]) => incident[key]).map(([, label]) => label);
+  push(`Strategy: ${strategyLabels.length ? strategyLabels.join(", ") : "(none checked)"}`, "H", 9);
+  const actionsWithText = (incident.actionsLog || []).filter(a => a.time || a.actions);
+  if (actionsWithText.length === 0) push("(none entered)");
+  else actionsWithText.forEach(a => wrapPush(L, `${a.time || "-"}: ${a.actions}`));
+  blank();
+  push(`Prepared By: ${incident.preparedBy || "-"}   Position: ${incident.prepPosition || "-"}`, "H", 9);
+  push(`Signature: ${incident.prepSignature || "-"}   Date/Time: ${incident.prepDateTime || "-"}`, "H", 9);
+  blank();
 
-    L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
-      (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
-  }
+  L.push(...tableLines(["RESOURCE", "IDENTIFIER", "ORDERED", "ETA", "ARRIVED", "NOTES"], [80, 80, 80, 60, 55, 155],
+    (incident.resourceOrders || []).map(r => [r.resource, r.identifier, r.ordered, r.eta, r.arrived ? "X" : "", r.notes]), "10. Resource Summary"));
 
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 90, 35, 70, 140],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
