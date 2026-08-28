@@ -91,9 +91,9 @@ export async function savePinConfig(cfg) {
 export async function loadPresets() {
   try {
     const snap = await getDoc(doc(db, "icMeta", "presets"));
-    return snap.exists() ? snap.data() : { units: [], objectives: [], assignments: [] };
+    return snap.exists() ? snap.data() : { departments: [], objectives: [], assignments: [] };
   } catch {
-    return { units: [], objectives: [], assignments: [] };
+    return { departments: [], objectives: [], assignments: [] };
   }
 }
 

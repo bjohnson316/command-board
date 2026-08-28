@@ -441,10 +441,13 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 /* ============================================================
    TAB: RESOURCE STATUS BOARD
    ============================================================ */
-function ResourceForm({ onAdd, unitPresets, onSavePreset, assignmentPresets, onSaveAssignmentPreset }) {
+function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset }) {
   const [f, setF] = useState({ label: "", kind: RESOURCE_KINDS[0], personnel: 1, assignment: "" });
-  const [addingField, setAddingField] = useState(null); // null | "unit" | "assignment"
+  const [deptId, setDeptId] = useState("");
+  const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment"
   const [newValue, setNewValue] = useState("");
+
+  const selectedDept = departments.find(d => d.id === deptId) || null;
 
   const submit = () => {
     if (!f.label.trim()) return;
@@ -456,30 +459,58 @@ function ResourceForm({ onAdd, unitPresets, onSavePreset, assignmentPresets, onS
   const confirmAdd = () => {
     const name = newValue.trim();
     if (!name) return;
-    if (addingField === "unit") { onSavePreset(name); setF(prev => ({ ...prev, label: name })); }
-    else { onSaveAssignmentPreset(name); setF(prev => ({ ...prev, assignment: name })); }
+    if (addingField === "department") {
+      const id = onAddDepartment(name);
+      setDeptId(id);
+      setF(prev => ({ ...prev, label: "" }));
+    } else if (addingField === "unit") {
+      onAddUnitUnderDepartment(deptId, name);
+      setF(prev => ({ ...prev, label: name }));
+    } else {
+      onSaveAssignmentPreset(name);
+      setF(prev => ({ ...prev, assignment: name }));
+    }
     setAddingField(null);
     setNewValue("");
   };
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-      <Field label="Unit / Resource ID">
-        {addingField === "unit" ? (
+      <Field label="Department">
+        {addingField === "department" ? (
           <div style={{ display: "flex", gap: 4 }}>
-            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New unit name" style={{ width: 150 }}
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="e.g. Sanger FD" style={{ width: 150 }}
               onKeyDown={e => { if (e.key === "Enter") confirmAdd(); if (e.key === "Escape") setAddingField(null); }} />
             <Btn kind="solid" onClick={confirmAdd} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
             <button onClick={() => setAddingField(null)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
           </div>
         ) : (
-          <Select value={f.label} onChange={e => {
+          <Select value={deptId} onChange={e => {
+            if (e.target.value === "__add_new__") startAdding("department");
+            else { setDeptId(e.target.value); setF(prev => ({ ...prev, label: "" })); }
+          }} style={{ width: 160 }}>
+            <option value="">Select department...</option>
+            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            <option value="__add_new__">+ Add Department</option>
+          </Select>
+        )}
+      </Field>
+      <Field label="Unit / Resource ID">
+        {addingField === "unit" ? (
+          <div style={{ display: "flex", gap: 4 }}>
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="e.g. Brush 581" style={{ width: 150 }}
+              onKeyDown={e => { if (e.key === "Enter") confirmAdd(); if (e.key === "Escape") setAddingField(null); }} />
+            <Btn kind="solid" onClick={confirmAdd} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingField(null)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ) : (
+          <Select value={f.label} disabled={!selectedDept} onChange={e => {
             if (e.target.value === "__add_new__") startAdding("unit");
             else setF({ ...f, label: e.target.value });
-          }} style={{ width: 200 }}>
-            <option value="">Select a unit...</option>
-            {unitPresets.map(u => <option key={u} value={u}>{u}</option>)}
-            <option value="__add_new__">+ Add Unit</option>
+          }} style={{ width: 200 }} title={!selectedDept ? "Select a department first" : undefined}>
+            <option value="">{selectedDept ? "Select a unit..." : "Select department first..."}</option>
+            {selectedDept && selectedDept.units.map(u => <option key={u} value={u}>{u}</option>)}
+            {selectedDept && <option value="__add_new__">+ Add Unit</option>}
           </Select>
         )}
       </Field>
@@ -568,7 +599,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, unitPresets, onSavePreset, assignmentPresets, onSaveAssignmentPreset }) {
+function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -610,7 +641,7 @@ function TabResources({ resources, setResources, now, unitPresets, onSavePreset,
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Check In Resource" icon={Truck}>
-        <ResourceForm onAdd={addResource} unitPresets={unitPresets} onSavePreset={onSavePreset} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} />
+        <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} />
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
@@ -2836,7 +2867,7 @@ function AppInner({ onLock }) {
   const [showChangePin, setShowChangePin] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ units: [], objectives: [], assignments: [] });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [] });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -2881,7 +2912,15 @@ function AppInner({ onLock }) {
       const idx = await loadIndex();
       setIndex(idx);
       const p = await loadPresets();
-      setPresets({ units: p.units || [], objectives: p.objectives || [], assignments: p.assignments || [] });
+      // Migrate the old flat unit list (before departments existed) into
+      // a "General" department bucket, so nobody's already-saved units
+      // silently disappear when this ships — they just land somewhere
+      // reorganizable instead of a fixed department nobody chose.
+      let departments = p.departments || [];
+      if (!p.departments && p.units && p.units.length > 0) {
+        departments = [{ id: uid(), name: "General", units: p.units }];
+      }
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [] });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -2960,11 +2999,28 @@ function AppInner({ onLock }) {
     });
   }, [resources, ready, incidentLoaded]);
 
-  const saveUnitPreset = async (unit) => {
-    if (!unit || presets.units.includes(unit)) return;
-    const next = { ...presets, units: [...presets.units, unit] };
+  // Returns the department's id synchronously (creating it if new) so
+  // the picker can switch straight to it without waiting on the network
+  // round-trip — the actual persist happens in the background.
+  const saveDepartment = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const existing = presets.departments.find(d => d.name === trimmed);
+    if (existing) return existing.id;
+    const id = uid();
+    const next = { ...presets, departments: [...presets.departments, { id, name: trimmed, units: [] }] };
     setPresets(next);
-    await savePresets(next);
+    savePresets(next);
+    return id;
+  };
+  const saveUnitUnderDepartment = (deptId, unitName) => {
+    const trimmed = unitName.trim();
+    if (!deptId || !trimmed) return;
+    const dept = presets.departments.find(d => d.id === deptId);
+    if (!dept || dept.units.includes(trimmed)) return;
+    const next = { ...presets, departments: presets.departments.map(d => d.id === deptId ? { ...d, units: [...d.units, trimmed] } : d) };
+    setPresets(next);
+    savePresets(next);
   };
   const saveObjectivePreset = async (objective) => {
     if (!objective || presets.objectives.includes(objective)) return;
@@ -3202,7 +3258,7 @@ function AppInner({ onLock }) {
           ) : (
             <>
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
-              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} unitPresets={presets.units} onSavePreset={saveUnitPreset} assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset} />}
+              {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow} departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment} assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset} />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
