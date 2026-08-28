@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
-  Printer, Plus, X, Clock, ChevronRight, ChevronUp, ChevronDown, Trash2, Download,
+  Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings
 } from "lucide-react";
@@ -448,6 +448,76 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 // Reusable rename/delete/reorder/add UI for a simple flat list —
 // shared by the Assignments and Types tabs below, which need
 // identical behavior and differ only in their data and labels.
+// Drag-to-reorder for a plain list, built on Pointer Events (not native
+// HTML5 drag-and-drop, which is unreliable on touch devices) — same
+// approach already used for the Resource Board columns. Reorders live
+// as you drag over other rows, then commits the final order on release
+// via onReorderFull(newFullArray), rather than one write per swap.
+function DragReorderList({ items, keyFn, onReorderFull, renderItem }) {
+  const [dragKey, setDragKey] = useState(null);
+  const [liveOrder, setLiveOrder] = useState(items);
+  const itemRefs = useRef({});
+  const liveOrderRef = useRef(items);
+
+  useEffect(() => { if (!dragKey) { setLiveOrder(items); liveOrderRef.current = items; } }, [items, dragKey]);
+  useEffect(() => { liveOrderRef.current = liveOrder; }, [liveOrder]);
+
+  useEffect(() => {
+    if (!dragKey) return;
+    const handleMove = (e) => {
+      const order = liveOrderRef.current;
+      const idx = order.findIndex(it => keyFn(it) === dragKey);
+      if (idx === -1) return;
+      // insertBeforeIdx = the position, in the ORIGINAL (pre-removal)
+      // array, before which the dragged item should land — found by
+      // the first row whose midpoint the pointer is above. Defaults to
+      // the very end if the pointer is below every row.
+      let insertBeforeIdx = order.length;
+      for (let i = 0; i < order.length; i++) {
+        const el = itemRefs.current[keyFn(order[i])];
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) { insertBeforeIdx = i; break; }
+      }
+      // Removing the dragged item first shifts every index after it
+      // down by one — so if the target position is after the source,
+      // it must be adjusted by -1 to land correctly in the now-shorter
+      // array. Skipping this produces an off-by-one: dropping into a
+      // row's top half would land the item one slot too far down.
+      if (insertBeforeIdx !== idx && insertBeforeIdx !== idx + 1) {
+        const next = [...order];
+        const [moved] = next.splice(idx, 1);
+        const insertAt = insertBeforeIdx > idx ? insertBeforeIdx - 1 : insertBeforeIdx;
+        next.splice(insertAt, 0, moved);
+        setLiveOrder(next);
+      }
+    };
+    const handleUp = () => {
+      setDragKey(null);
+      onReorderFull(liveOrderRef.current);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+  }, [dragKey]);
+
+  return liveOrder.map((item, i) => {
+    const k = keyFn(item);
+    const dragHandleProps = {
+      onPointerDown: (e) => { e.preventDefault(); setDragKey(k); },
+      style: { cursor: "grab", touchAction: "none" },
+    };
+    return (
+      <div key={k} ref={el => { itemRefs.current[k] = el; }} style={{ opacity: dragKey === k ? 0.4 : 1 }}>
+        {renderItem(item, i, dragHandleProps)}
+      </div>
+    );
+  });
+}
+
 function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel, addPlaceholder, emptyLabel }) {
   const [adding, setAdding] = useState(false);
   const [newValue, setNewValue] = useState("");
@@ -460,19 +530,16 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
   return (
     <div>
       {items.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13, marginBottom: 12 }}>{emptyLabel}</div>}
-      {items.map((item, i) => (
-        <div key={item} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <button onClick={() => onReorder(item, -1)} disabled={i === 0} title="Move up" style={{ background: "none", border: "none", color: i === 0 ? COLORS.line : COLORS.faint, cursor: i === 0 ? "default" : "pointer", padding: 0, lineHeight: 0 }}><ChevronUp size={14} /></button>
-            <button onClick={() => onReorder(item, 1)} disabled={i === items.length - 1} title="Move down" style={{ background: "none", border: "none", color: i === items.length - 1 ? COLORS.line : COLORS.faint, cursor: i === items.length - 1 ? "default" : "pointer", padding: 0, lineHeight: 0 }}><ChevronDown size={14} /></button>
-          </div>
+      <DragReorderList items={items} keyFn={item => item} onReorderFull={onReorder} renderItem={(item, i, dragHandleProps) => (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+          <span {...dragHandleProps} title="Drag to reorder" style={{ ...dragHandleProps.style, color: COLORS.faint, flexShrink: 0 }}><GripVertical size={15} /></span>
           <TextInput key={item} defaultValue={item}
             onBlur={e => { const v = e.target.value.trim(); if (v && v !== item) onRename(item, v); }}
             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
             style={{ flex: 1, fontSize: 12.5 }} />
           <button onClick={() => onDelete(item)} title="Delete" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button>
         </div>
-      ))}
+      )} />
       {adding ? (
         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
           <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder={addPlaceholder} style={{ flex: 1 }}
@@ -487,12 +554,7 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
   );
 }
 
-const ReorderArrows = ({ onUp, onDown, disabledUp, disabledDown }) => (
-  <div style={{ display: "flex", flexDirection: "column" }}>
-    <button onClick={onUp} disabled={disabledUp} title="Move up" style={{ background: "none", border: "none", color: disabledUp ? COLORS.line : COLORS.faint, cursor: disabledUp ? "default" : "pointer", padding: 0, lineHeight: 0 }}><ChevronUp size={14} /></button>
-    <button onClick={onDown} disabled={disabledDown} title="Move down" style={{ background: "none", border: "none", color: disabledDown ? COLORS.line : COLORS.faint, cursor: disabledDown ? "default" : "pointer", padding: 0, lineHeight: 0 }}><ChevronDown size={14} /></button>
-  </div>
-);
+
 
 // Single management modal for everything the Check In Resource form
 // pulls from — Departments & Units, Assignments/Divisions, and
@@ -551,17 +613,15 @@ function ManageResourcesModal({
         {subTab === "departments" && (
           <>
             <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
-              Edit a name and click away (or press Enter) to rename it. Use the arrows to reorder, or the dropdown next to a unit to move it to a different department.
+              Edit a name and click away (or press Enter) to rename it. Drag the grip to reorder, or use the dropdown next to a unit to move it to a different department.
             </div>
 
             {departments.length === 0 && <div style={{ color: COLORS.faint, fontSize: 13, marginBottom: 12 }}>No departments yet.</div>}
 
-            {departments.map((d, di) => (
-              <div key={d.id} style={{ marginBottom: 14, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12 }}>
+            <DragReorderList items={departments} keyFn={d => d.id} onReorderFull={onReorderDept} renderItem={(d, di, deptDragProps) => (
+              <div style={{ marginBottom: 14, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                  <ReorderArrows
-                    onUp={() => onReorderDept(d.id, -1)} onDown={() => onReorderDept(d.id, 1)}
-                    disabledUp={di === 0} disabledDown={di === departments.length - 1} />
+                  <span {...deptDragProps} title="Drag to reorder" style={{ ...deptDragProps.style, color: COLORS.faint, flexShrink: 0 }}><GripVertical size={16} /></span>
                   <TextInput key={d.id + d.name} defaultValue={d.name}
                     onBlur={e => { const v = e.target.value.trim(); if (v && v !== d.name) onRenameDept(d.id, v); }}
                     onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
@@ -569,11 +629,9 @@ function ManageResourcesModal({
                   <button onClick={() => onDeleteDept(d.id)} title="Delete department (and its units)" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={15} /></button>
                 </div>
 
-                {d.units.map((u, ui) => (
-                  <div key={u} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, paddingLeft: 14 }}>
-                    <ReorderArrows
-                      onUp={() => onReorderUnit(d.id, u, -1)} onDown={() => onReorderUnit(d.id, u, 1)}
-                      disabledUp={ui === 0} disabledDown={ui === d.units.length - 1} />
+                <DragReorderList items={d.units} keyFn={u => u} onReorderFull={(newUnits) => onReorderUnit(d.id, newUnits)} renderItem={(u, ui, unitDragProps) => (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, paddingLeft: 14 }}>
+                    <span {...unitDragProps} title="Drag to reorder" style={{ ...unitDragProps.style, color: COLORS.faint, flexShrink: 0 }}><GripVertical size={14} /></span>
                     <TextInput key={d.id + u} defaultValue={u}
                       onBlur={e => { const v = e.target.value.trim(); if (v && v !== u) onRenameUnit(d.id, u, v); }}
                       onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
@@ -585,7 +643,7 @@ function ManageResourcesModal({
                     )}
                     <button onClick={() => onDeleteUnit(d.id, u)} title="Delete unit" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={13} /></button>
                   </div>
-                ))}
+                )} />
 
                 {addingUnitFor === d.id ? (
                   <div style={{ display: "flex", gap: 6, paddingLeft: 14, marginTop: 6 }}>
@@ -598,7 +656,7 @@ function ManageResourcesModal({
                   <Btn kind="subtle" icon={Plus} onClick={() => { setAddingUnitFor(d.id); setNewValue(""); }} style={{ marginTop: 6, marginLeft: 14, padding: "4px 8px", fontSize: 11.5 }}>Add Unit</Btn>
                 )}
               </div>
-            ))}
+            )} />
 
             {addingDeptFor ? (
               <div style={{ display: "flex", gap: 6 }}>
@@ -3273,29 +3331,13 @@ function AppInner({ onLock }) {
     setPresets(next);
     savePresets(next);
   };
-  const reorderDepartment = (deptId, direction) => {
-    const idx = presets.departments.findIndex(d => d.id === deptId);
-    const newIdx = idx + direction;
-    if (idx === -1 || newIdx < 0 || newIdx >= presets.departments.length) return;
-    const arr = [...presets.departments];
-    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
-    const next = { ...presets, departments: arr };
+  const reorderDepartments = (newDepartments) => {
+    const next = { ...presets, departments: newDepartments };
     setPresets(next);
     savePresets(next);
   };
-  const reorderUnit = (deptId, unitName, direction) => {
-    const next = {
-      ...presets,
-      departments: presets.departments.map(d => {
-        if (d.id !== deptId) return d;
-        const idx = d.units.indexOf(unitName);
-        const newIdx = idx + direction;
-        if (idx === -1 || newIdx < 0 || newIdx >= d.units.length) return d;
-        const units = [...d.units];
-        [units[idx], units[newIdx]] = [units[newIdx], units[idx]];
-        return { ...d, units };
-      }),
-    };
+  const reorderUnits = (deptId, newUnits) => {
+    const next = { ...presets, departments: presets.departments.map(d => d.id === deptId ? { ...d, units: newUnits } : d) };
     setPresets(next);
     savePresets(next);
   };
@@ -3309,13 +3351,8 @@ function AppInner({ onLock }) {
     setPresets(next);
     savePresets(next);
   };
-  const reorderAssignmentPreset = (name, direction) => {
-    const idx = presets.assignments.indexOf(name);
-    const newIdx = idx + direction;
-    if (idx === -1 || newIdx < 0 || newIdx >= presets.assignments.length) return;
-    const arr = [...presets.assignments];
-    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
-    const next = { ...presets, assignments: arr };
+  const reorderAssignmentPresets = (newAssignments) => {
+    const next = { ...presets, assignments: newAssignments };
     setPresets(next);
     savePresets(next);
   };
@@ -3336,13 +3373,8 @@ function AppInner({ onLock }) {
     setPresets(next);
     savePresets(next);
   };
-  const reorderResourceKind = (name, direction) => {
-    const idx = presets.resourceKinds.indexOf(name);
-    const newIdx = idx + direction;
-    if (idx === -1 || newIdx < 0 || newIdx >= presets.resourceKinds.length) return;
-    const arr = [...presets.resourceKinds];
-    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
-    const next = { ...presets, resourceKinds: arr };
+  const reorderResourceKinds = (newKinds) => {
+    const next = { ...presets, resourceKinds: newKinds };
     setPresets(next);
     savePresets(next);
   };
@@ -3584,12 +3616,12 @@ function AppInner({ onLock }) {
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
-                onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartment}
-                onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnit}
+                onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
+                onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnits}
                 assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset}
-                onRenameAssignment={renameAssignmentPreset} onDeleteAssignment={deleteAssignmentPreset} onReorderAssignment={reorderAssignmentPreset}
+                onRenameAssignment={renameAssignmentPreset} onDeleteAssignment={deleteAssignmentPreset} onReorderAssignment={reorderAssignmentPresets}
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
-                onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKind}
+                onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
               />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
