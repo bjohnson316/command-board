@@ -1310,7 +1310,7 @@ function TabRehab({ rehab, setRehab, resources, now }) {
               <button onClick={() => remove(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer", height: 36 }}><Trash2 size={14} /></button>
             </div>
             <div style={{ display: "flex", gap: 14, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>In: {fmtTime(r.timeIn)} · {elapsed(r.timeIn, now)} elapsed</span>
+              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>In: {fmtTime(r.timeIn)} · {elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : now)} elapsed</span>
               {r.timeCleared && <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>Cleared: {fmtTime(r.timeCleared)}</span>}
               {r.status === "In Rehab" && <Btn kind="subtle" icon={CheckCircle2} onClick={() => clear(r.id)} style={{ padding: "4px 9px", fontSize: 11.5 }}>Clear</Btn>}
               <TextInput value={r.notes} onChange={e => update(r.id, { notes: e.target.value })} placeholder="Notes" style={{ flex: 1, minWidth: 160 }} />
