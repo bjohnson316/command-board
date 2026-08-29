@@ -1353,14 +1353,19 @@ function TabMapping({ mapData, setMapData }) {
   // less reliable than just trusting the browser to do what it
   // already does correctly and consistently across devices.
   const handleOverlayClick = (e) => {
+    // Diagnostic logging left in deliberately — three attempts at this
+    // specific bug haven't resolved it, and the last test showed no
+    // console errors at all, which itself is informative: it means
+    // either this handler isn't being reached, or activeTool isn't
+    // "text" at the moment of the click. This will show which.
+    console.log("[Mapping] overlay click received, activeTool =", activeTool);
     if (activeTool !== "text") return;
     try {
-      setTextPrompt({ latlng: overlayToLatLng(e), value: "" });
+      const latlng = overlayToLatLng(e);
+      console.log("[Mapping] placing text prompt at", latlng);
+      setTextPrompt({ latlng, value: "" });
     } catch (err) {
-      // If this still doesn't show up on some browser, this at least
-      // puts a concrete error in the console instead of failing
-      // silently with nothing to go on.
-      console.error("Text label placement failed:", err);
+      console.error("[Mapping] text label placement failed:", err);
     }
   };
 
@@ -1463,7 +1468,7 @@ function TabMapping({ mapData, setMapData }) {
               onPointerMove={handleOverlayPointerMove}
               onPointerUp={handleOverlayPointerUp}
               onPointerCancel={handleOverlayPointerUp}
-              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000 }}
+              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000, border: "3px solid #E85D28", boxSizing: "border-box" }}
             />
           )}
         </div>
