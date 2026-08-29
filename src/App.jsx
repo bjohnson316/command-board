@@ -1304,37 +1304,73 @@ function TabMapping({ mapData, setMapData }) {
   // on which tool is active, rather than inside the mount-once effect
   // above — this lets them attach/detach cleanly as the toolbar
   // buttons are toggled without needing to tear down the whole map.
+  //
+  // Both use raw pointer events with setPointerCapture (the same
+  // technique already proven reliable for the Resource Board's
+  // drag-and-drop) instead of Leaflet's own "click" event, which
+  // has a built-in tap-vs-drag heuristic that can silently swallow a
+  // tap if there's even slight finger/pencil movement — exactly the
+  // kind of thing that makes a tool "do nothing" intermittently on a
+  // touchscreen. Pointer capture also ensures move/up events for a
+  // given touch keep arriving even if the finger drifts to the edge
+  // of the map, which matters for a fast freehand stroke.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const container = map.getContainer();
 
     if (activeTool === "text") {
-      const handler = (e) => setTextPrompt({ latlng: e.latlng, value: "" });
-      map.on("click", handler);
-      return () => map.off("click", handler);
+      let down = null; // { x, y, time, pointerId }
+      const onDown = (evt) => {
+        container.setPointerCapture(evt.pointerId);
+        down = { x: evt.clientX, y: evt.clientY, time: Date.now(), pointerId: evt.pointerId };
+      };
+      const onUp = (evt) => {
+        if (!down || evt.pointerId !== down.pointerId) return;
+        container.releasePointerCapture(evt.pointerId);
+        const dist = Math.hypot(evt.clientX - down.x, evt.clientY - down.y);
+        const elapsed = Date.now() - down.time;
+        down = null;
+        // Distinguish a genuine tap from a pan/drag ourselves, rather
+        // than trusting Leaflet's click synthesis — lets the map
+        // still be panned normally while this tool is armed, and
+        // only opens the prompt on an actual short tap.
+        if (dist < 10 && elapsed < 500) {
+          setTextPrompt({ latlng: map.mouseEventToLatLng(evt), value: "" });
+        }
+      };
+      container.addEventListener("pointerdown", onDown);
+      container.addEventListener("pointerup", onUp);
+      container.addEventListener("pointercancel", onUp);
+      return () => {
+        container.removeEventListener("pointerdown", onDown);
+        container.removeEventListener("pointerup", onUp);
+        container.removeEventListener("pointercancel", onUp);
+      };
     }
 
     if (activeTool === "freehand") {
       map.dragging.disable(); // otherwise dragging draws AND pans at once
-      const container = map.getContainer();
       const toLatLng = (evt) => map.mouseEventToLatLng(evt);
 
       const onDown = (evt) => {
         evt.preventDefault();
+        container.setPointerCapture(evt.pointerId);
         const start = toLatLng(evt);
         const tempLine = L.polyline([start], { color: "#2E8B72", weight: 3 }).addTo(map);
-        freehandStateRef.current = { points: [start], tempLine };
+        freehandStateRef.current = { points: [start], tempLine, pointerId: evt.pointerId };
       };
       const onMove = (evt) => {
-        if (!freehandStateRef.current) return;
+        if (!freehandStateRef.current || evt.pointerId !== freehandStateRef.current.pointerId) return;
         evt.preventDefault();
         const pt = toLatLng(evt);
         freehandStateRef.current.points.push(pt);
         freehandStateRef.current.tempLine.setLatLngs(freehandStateRef.current.points);
       };
-      const onUp = () => {
+      const onUp = (evt) => {
         const state = freehandStateRef.current;
-        if (!state) return;
+        if (!state || evt.pointerId !== state.pointerId) return;
+        container.releasePointerCapture(evt.pointerId);
         map.removeLayer(state.tempLine);
         if (state.points.length > 1) {
           const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
@@ -1346,12 +1382,14 @@ function TabMapping({ mapData, setMapData }) {
 
       container.addEventListener("pointerdown", onDown);
       container.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+      container.addEventListener("pointerup", onUp);
+      container.addEventListener("pointercancel", onUp);
       return () => {
         map.dragging.enable();
         container.removeEventListener("pointerdown", onDown);
         container.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
+        container.removeEventListener("pointerup", onUp);
+        container.removeEventListener("pointercancel", onUp);
         if (freehandStateRef.current) { map.removeLayer(freehandStateRef.current.tempLine); freehandStateRef.current = null; }
       };
     }
