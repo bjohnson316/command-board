@@ -340,6 +340,29 @@ function defaultMapData() {
   return { type: "FeatureCollection", features: [] };
 }
 
+// mapData is stored in Firestore as a JSON STRING, not as a nested
+// object — Firestore rejects any field containing a directly nested
+// array (an array inside another array with no object in between),
+// and GeoJSON's own coordinate format is exactly that for anything
+// beyond a single point: a LineString's coordinates look like
+// [[lng,lat],[lng,lat],...], a Polygon's are nested one level deeper
+// still. A marker's [lng,lat] is flat and saved fine, which is why
+// drop-pins synced while every multi-point shape (freehand lines,
+// polygons, rectangles, leaflet-draw's own polyline tool) silently
+// failed to save at all — the write was throwing, uncaught, which
+// left the sync indicator stuck rather than showing an error.
+// Storing the whole thing as one opaque string sidesteps the
+// restriction entirely; parseMapData handles a missing field, an
+// already-parsed object (e.g. from startNew's blank template), or a
+// JSON string, so it's safe regardless of which shape it's given.
+function parseMapData(raw) {
+  if (!raw) return defaultMapData();
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch { return defaultMapData(); }
+  }
+  return raw;
+}
+
 // A text label on the map is a marker with a DivIcon rendering the
 // text directly (styled like a sticky note, not a location pin) —
 // used both when placing a new label and when reconstructing a saved
@@ -4235,7 +4258,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setIcs206({ ...defaultIcs206(), ...(blob.ics206 || {}) });
     setFormsUsed(blob.formsUsed || {});
     setRehab(blob.rehab || []);
-    setMapData(blob.mapData || defaultMapData());
+    setMapData(parseMapData(blob.mapData));
     setLogs(blob.logs || []);
     if (markSynced) lastKnownUpdatedAt.current = blob.updatedAt || null;
   }
@@ -4258,7 +4281,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const updatedAt = nowISO();
-      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, updatedAt };
+      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData: JSON.stringify(mapData), updatedAt };
       const ok = await saveIncidentBlob(incident.id, blob);
       const meta = { id: incident.id, name: incident.name, type: incident.type, savedAt: updatedAt };
       const nextIndex = [meta, ...index.filter(i => i.id !== incident.id)];
