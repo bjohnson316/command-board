@@ -1200,6 +1200,7 @@ function TabMapping({ mapData, setMapData }) {
   const gpsAccuracyRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
   const freehandStateRef = useRef(null); // { points, tempLine } while actively drawing
+  const textDownRef = useRef(null); // { x, y, time, latlng } for tap-vs-drag detection
   const [tracking, setTracking] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
@@ -1299,83 +1300,65 @@ function TabMapping({ mapData, setMapData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Text-label and freehand tools are custom (leaflet-draw doesn't
-  // support either), so they're wired up in a separate effect keyed
-  // on which tool is active, rather than inside the mount-once effect
-  // above — this lets them attach/detach cleanly as the toolbar
-  // buttons are toggled without needing to tear down the whole map.
+  // Text-label and freehand tools are implemented via a transparent
+  // overlay element placed on top of the map (rendered below, only
+  // while one of these tools is armed) using REACT's own pointer
+  // event props — not Leaflet's event system, and not raw DOM
+  // listeners attached to the map's own container.
   //
-  // These use Leaflet's OWN mouse event API (map.on("mousedown"), not
-  // raw DOM pointer events on the container) — the same mechanism
-  // leaflet-draw itself uses internally for its polyline/polygon
-  // tools. An earlier version of this used raw pointer events with
-  // setPointerCapture, which turned out to still fail (reported on
-  // both a mouse-driven desktop browser and an iPhone, ruling out a
-  // touch-specific cause) — most likely because it was competing with
-  // Leaflet's own internal event handling on that same container
-  // element. Routing through Leaflet's own event system avoids that
-  // conflict entirely, and Leaflet already normalizes mouse vs. touch
-  // input internally, so this one code path covers both.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+  // Two earlier versions of this tried both of those approaches and
+  // each behaved inconsistently across devices in a way that didn't
+  // point to a single clean cause (one browser's tap/click synthesis
+  // working, another's not) — the common thread was competing with
+  // Leaflet's own extensive internal event handling on that same
+  // container element. A separate overlay sidesteps that completely:
+  // it's a different DOM element Leaflet never sees, so there's
+  // nothing for these tools' events to conflict with, and React's
+  // pointer event system is normalized consistently across mouse,
+  // touch, and pen input by the browser itself.
+  const overlayToLatLng = (e) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    return mapRef.current.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  };
 
+  const handleOverlayPointerDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
     if (activeTool === "text") {
-      let down = null; // { latlng, x, y, time }
-      const onDown = (e) => { down = { latlng: e.latlng, x: e.containerPoint.x, y: e.containerPoint.y, time: Date.now() }; };
-      const onUp = (e) => {
-        if (!down) return;
-        const dist = Math.hypot(e.containerPoint.x - down.x, e.containerPoint.y - down.y);
-        const elapsed = Date.now() - down.time;
-        const latlng = down.latlng;
-        down = null;
-        // Distinguish a genuine tap from a pan/drag ourselves, rather
-        // than trusting Leaflet's built-in "click" event, which can
-        // silently swallow a tap if it detects any movement at all —
-        // lets the map still be panned normally while this tool is
-        // armed, and only opens the prompt on an actual short tap.
-        if (dist < 10 && elapsed < 500) setTextPrompt({ latlng, value: "" });
-      };
-      map.on("mousedown", onDown);
-      map.on("mouseup", onUp);
-      return () => { map.off("mousedown", onDown); map.off("mouseup", onUp); };
+      textDownRef.current = { x: e.clientX, y: e.clientY, time: Date.now(), latlng: overlayToLatLng(e) };
+    } else if (activeTool === "freehand") {
+      const start = overlayToLatLng(e);
+      const tempLine = L.polyline([start], { color: "#2E8B72", weight: 3 }).addTo(mapRef.current);
+      freehandStateRef.current = { points: [start], tempLine };
     }
-
-    if (activeTool === "freehand") {
-      map.dragging.disable(); // otherwise dragging draws AND pans at once
-      const onMove = (e) => {
-        if (!freehandStateRef.current) return;
-        freehandStateRef.current.points.push(e.latlng);
-        freehandStateRef.current.tempLine.setLatLngs(freehandStateRef.current.points);
-      };
-      const onDown = (e) => {
-        const tempLine = L.polyline([e.latlng], { color: "#2E8B72", weight: 3 }).addTo(map);
-        freehandStateRef.current = { points: [e.latlng], tempLine };
-        map.on("mousemove", onMove);
-      };
-      const onUp = () => {
-        map.off("mousemove", onMove);
-        const state = freehandStateRef.current;
-        if (!state) return;
-        map.removeLayer(state.tempLine);
-        if (state.points.length > 1) {
-          const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
-          drawnItemsRef.current.addLayer(finalLine);
-          persistRef.current();
-        }
-        freehandStateRef.current = null;
-      };
-      map.on("mousedown", onDown);
-      map.on("mouseup", onUp);
-      return () => {
-        map.dragging.enable();
-        map.off("mousedown", onDown);
-        map.off("mousemove", onMove);
-        map.off("mouseup", onUp);
-        if (freehandStateRef.current) { map.removeLayer(freehandStateRef.current.tempLine); freehandStateRef.current = null; }
-      };
+  };
+  const handleOverlayPointerMove = (e) => {
+    if (activeTool === "freehand" && freehandStateRef.current) {
+      const pt = overlayToLatLng(e);
+      freehandStateRef.current.points.push(pt);
+      freehandStateRef.current.tempLine.setLatLngs(freehandStateRef.current.points);
     }
-  }, [activeTool]);
+  };
+  const handleOverlayPointerUp = (e) => {
+    if (activeTool === "text" && textDownRef.current) {
+      const down = textDownRef.current;
+      textDownRef.current = null;
+      const dist = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      const elapsed = Date.now() - down.time;
+      // Distinguish a genuine tap from a drag ourselves (rather than
+      // relying on any framework's built-in click-vs-drag detection),
+      // so a text label only gets placed on an actual short tap.
+      if (dist < 10 && elapsed < 600) setTextPrompt({ latlng: down.latlng, value: "" });
+    } else if (activeTool === "freehand" && freehandStateRef.current) {
+      const state = freehandStateRef.current;
+      mapRef.current.removeLayer(state.tempLine);
+      if (state.points.length > 1) {
+        const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
+        drawnItemsRef.current.addLayer(finalLine);
+        persistRef.current();
+      }
+      freehandStateRef.current = null;
+    }
+  };
 
   const confirmTextLabel = () => {
     const text = textPrompt.value.trim();
@@ -1435,10 +1418,21 @@ function TabMapping({ mapData, setMapData }) {
         </div>
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil — all saved automatically and shared across the board. Switch between street and satellite view from the layer control (top-right).
+          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil — all saved automatically and shared across the board. While either of those two is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
         </div>
-        <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}`, touchAction: activeTool === "freehand" ? "none" : "auto" }} />
+        <div style={{ position: "relative" }}>
+          <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
+          {(activeTool === "text" || activeTool === "freehand") && (
+            <div
+              onPointerDown={handleOverlayPointerDown}
+              onPointerMove={handleOverlayPointerMove}
+              onPointerUp={handleOverlayPointerUp}
+              onPointerCancel={handleOverlayPointerUp}
+              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000 }}
+            />
+          )}
+        </div>
       </Panel>
 
       {textPrompt && (
