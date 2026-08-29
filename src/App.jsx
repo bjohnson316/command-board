@@ -1223,7 +1223,6 @@ function TabMapping({ mapData, setMapData }) {
   const gpsAccuracyRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
   const freehandStateRef = useRef(null); // { points, tempLine } while actively drawing
-  const textDownRef = useRef(null); // { x, y, time, latlng } for tap-vs-drag detection
   const [tracking, setTracking] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
@@ -1344,15 +1343,35 @@ function TabMapping({ mapData, setMapData }) {
     return mapRef.current.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
   };
 
-  const handleOverlayPointerDown = (e) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (activeTool === "text") {
-      textDownRef.current = { x: e.clientX, y: e.clientY, time: Date.now(), latlng: overlayToLatLng(e) };
-    } else if (activeTool === "freehand") {
-      const start = overlayToLatLng(e);
-      const tempLine = L.polyline([start], { color: "#2E8B72", weight: 3 }).addTo(mapRef.current);
-      freehandStateRef.current = { points: [start], tempLine };
+  // Text placement uses a plain native onClick — deliberately NOT a
+  // hand-rolled tap-vs-drag distance/time check. A browser's own
+  // click event already only fires when there's no significant
+  // movement between press and release; that's true for any ordinary
+  // DOM element and has nothing to do with Leaflet, since this
+  // overlay is a plain div Leaflet doesn't know exists. An earlier
+  // version reimplemented that distinction manually, which turned out
+  // less reliable than just trusting the browser to do what it
+  // already does correctly and consistently across devices.
+  const handleOverlayClick = (e) => {
+    if (activeTool !== "text") return;
+    try {
+      setTextPrompt({ latlng: overlayToLatLng(e), value: "" });
+    } catch (err) {
+      // If this still doesn't show up on some browser, this at least
+      // puts a concrete error in the console instead of failing
+      // silently with nothing to go on.
+      console.error("Text label placement failed:", err);
     }
+  };
+
+  // Freehand still needs real pointer tracking, since it has to
+  // follow the drag continuously rather than just detect its end.
+  const handleOverlayPointerDown = (e) => {
+    if (activeTool !== "freehand") return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const start = overlayToLatLng(e);
+    const tempLine = L.polyline([start], { color: "#2E8B72", weight: 3 }).addTo(mapRef.current);
+    freehandStateRef.current = { points: [start], tempLine };
   };
   const handleOverlayPointerMove = (e) => {
     if (activeTool === "freehand" && freehandStateRef.current) {
@@ -1361,17 +1380,8 @@ function TabMapping({ mapData, setMapData }) {
       freehandStateRef.current.tempLine.setLatLngs(freehandStateRef.current.points);
     }
   };
-  const handleOverlayPointerUp = (e) => {
-    if (activeTool === "text" && textDownRef.current) {
-      const down = textDownRef.current;
-      textDownRef.current = null;
-      const dist = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-      const elapsed = Date.now() - down.time;
-      // Distinguish a genuine tap from a drag ourselves (rather than
-      // relying on any framework's built-in click-vs-drag detection),
-      // so a text label only gets placed on an actual short tap.
-      if (dist < 10 && elapsed < 600) setTextPrompt({ latlng: down.latlng, value: "" });
-    } else if (activeTool === "freehand" && freehandStateRef.current) {
+  const handleOverlayPointerUp = () => {
+    if (activeTool === "freehand" && freehandStateRef.current) {
       const state = freehandStateRef.current;
       mapRef.current.removeLayer(state.tempLine);
       if (state.points.length > 1) {
@@ -1448,6 +1458,7 @@ function TabMapping({ mapData, setMapData }) {
           <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
           {(activeTool === "text" || activeTool === "freehand") && (
             <div
+              onClick={handleOverlayClick}
               onPointerDown={handleOverlayPointerDown}
               onPointerMove={handleOverlayPointerMove}
               onPointerUp={handleOverlayPointerUp}
