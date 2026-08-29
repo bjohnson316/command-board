@@ -106,16 +106,16 @@ export default function PinGate({ children }) {
               No PIN is set yet. Choose one now — everyone who accesses this board will need it.
               Anyone who already has this link can set the first PIN, so do this before sharing the URL.
             </p>
-            <input style={{ ...input, marginTop: 6 }} type="password" inputMode="numeric" placeholder="New PIN" value={pin}
+            <input id="new-pin" name="new-pin" autoComplete="off" style={{ ...input, marginTop: 6 }} type="password" inputMode="numeric" placeholder="New PIN" value={pin}
               onChange={e => setPin(e.target.value.replace(/\D/g, ""))} maxLength={12} />
-            <input style={{ ...input, marginTop: 10 }} type="password" inputMode="numeric" placeholder="Confirm PIN" value={pin2}
+            <input id="confirm-pin" name="confirm-pin" autoComplete="off" style={{ ...input, marginTop: 10 }} type="password" inputMode="numeric" placeholder="Confirm PIN" value={pin2}
               onChange={e => setPin2(e.target.value.replace(/\D/g, ""))} maxLength={12}
               onKeyDown={e => e.key === "Enter" && doSetup()} />
             <button style={btn} onClick={doSetup}>Set PIN & Continue</button>
           </>
         ) : (
           <>
-            <input style={input} type="password" inputMode="numeric" autoFocus placeholder="PIN" value={pin}
+            <input id="board-pin" name="board-pin" autoComplete="off" style={input} type="password" inputMode="numeric" autoFocus placeholder="PIN" value={pin}
               onChange={e => setPin(e.target.value.replace(/\D/g, ""))} maxLength={12}
               onKeyDown={e => e.key === "Enter" && doUnlock()} />
             <button style={btn} onClick={doUnlock}><Lock size={13} style={{ marginRight: 6, verticalAlign: -2 }} />Unlock</button>

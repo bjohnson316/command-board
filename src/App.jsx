@@ -3575,13 +3575,13 @@ function ChangePinModal({ onClose }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <Field label="Current PIN">
-              <TextInput type="password" inputMode="numeric" value={current} onChange={e => setCurrent(e.target.value.replace(/\D/g, ""))} maxLength={12} />
+              <TextInput id="change-pin-current" name="change-pin-current" autoComplete="off" type="password" inputMode="numeric" value={current} onChange={e => setCurrent(e.target.value.replace(/\D/g, ""))} maxLength={12} />
             </Field>
             <Field label="New PIN">
-              <TextInput type="password" inputMode="numeric" value={next} onChange={e => setNext(e.target.value.replace(/\D/g, ""))} maxLength={12} />
+              <TextInput id="change-pin-new" name="change-pin-new" autoComplete="off" type="password" inputMode="numeric" value={next} onChange={e => setNext(e.target.value.replace(/\D/g, ""))} maxLength={12} />
             </Field>
             <Field label="Confirm New PIN">
-              <TextInput type="password" inputMode="numeric" value={confirm} onChange={e => setConfirm(e.target.value.replace(/\D/g, ""))} maxLength={12}
+              <TextInput id="change-pin-confirm" name="change-pin-confirm" autoComplete="off" type="password" inputMode="numeric" value={confirm} onChange={e => setConfirm(e.target.value.replace(/\D/g, ""))} maxLength={12}
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </Field>
             {error && <div style={{ color: COLORS.dangerText, fontSize: 12 }}>{error}</div>}
@@ -3632,13 +3632,13 @@ function ChangeArchivePasswordModal({ onClose }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <Field label="Current Archive Password">
-              <TextInput type="password" value={current} onChange={e => setCurrent(e.target.value)} />
+              <TextInput id="change-archive-pw-current" name="change-archive-pw-current" autoComplete="off" type="password" value={current} onChange={e => setCurrent(e.target.value)} />
             </Field>
             <Field label="New Archive Password">
-              <TextInput type="password" value={next} onChange={e => setNext(e.target.value)} />
+              <TextInput id="change-archive-pw-new" name="change-archive-pw-new" autoComplete="off" type="password" value={next} onChange={e => setNext(e.target.value)} />
             </Field>
             <Field label="Confirm New Password">
-              <TextInput type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+              <TextInput id="change-archive-pw-confirm" name="change-archive-pw-confirm" autoComplete="off" type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </Field>
             {error && <div style={{ color: COLORS.dangerText, fontSize: 12 }}>{error}</div>}
@@ -3700,7 +3700,7 @@ function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
         {phase === "prompt" && (
           <>
             <p style={{ fontSize: 12.5, color: COLORS.muted, marginTop: 0, lineHeight: 1.5 }}>{message}</p>
-            <TextInput type="password" autoFocus placeholder="Archive password" value={pin} onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
+            <TextInput id="archive-unlock-pw" name="archive-unlock-pw" autoComplete="off" type="password" autoFocus placeholder="Archive password" value={pin} onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
               onKeyDown={e => e.key === "Enter" && submit()} />
             <Btn kind="solid" onClick={submit} disabled={checking} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
               {checking ? "Checking…" : "Confirm"}
@@ -3847,11 +3847,11 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
                   ? "No archive password is set yet. Choose one now — this is separate from the board's main PIN, and is only needed to view or export incidents that have been closed out."
                   : "Enter the archive password to view closed-out incidents."}
               </p>
-              <TextInput type="password" autoFocus placeholder={phase === "setup" ? "New archive password" : "Archive password"} value={pin}
+              <TextInput id="archive-pw-primary" name="archive-pw-primary" autoComplete="off" type="password" autoFocus placeholder={phase === "setup" ? "New archive password" : "Archive password"} value={pin}
                 onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
                 onKeyDown={e => e.key === "Enter" && phase === "locked" && doUnlock()} />
               {phase === "setup" && (
-                <TextInput type="password" placeholder="Confirm password" value={pin2} onChange={e => setPin2(e.target.value)}
+                <TextInput id="archive-pw-confirm" name="archive-pw-confirm" autoComplete="off" type="password" placeholder="Confirm password" value={pin2} onChange={e => setPin2(e.target.value)}
                   style={{ width: "100%", marginTop: 10 }}
                   onKeyDown={e => e.key === "Enter" && doSetup()} />
               )}
@@ -3912,8 +3912,8 @@ const TABS = [
 function GlobalStyles() {
   return (
     <style>{`
-      ${THEME_CSS}
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+      ${THEME_CSS}
       * { box-sizing: border-box; }
       html, body, #root { margin: 0; padding: 0; min-height: 100%; background: ${COLORS.bg}; }
       select { -webkit-appearance: none; }
