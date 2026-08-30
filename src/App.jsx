@@ -1648,9 +1648,31 @@ function TabMapping({ mapData, setMapData }) {
       const state = freehandStateRef.current;
       mapRef.current.removeLayer(state.tempLine);
       if (state.points.length > 1) {
-        const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
-        drawnItemsRef.current.addLayer(finalLine);
-        makeLayerMovable(finalLine);
+        // If the sketch ends back near where it started, treat it as
+        // a deliberately closed perimeter (same as GPS tracing) and
+        // calculate its acreage; otherwise keep it as an open line,
+        // since freehand is also used for open sketches like hose
+        // lays or access routes that were never meant to enclose an
+        // area. The threshold scales with the sketch's own size
+        // (15%, with a 15m floor) rather than a fixed distance, so it
+        // works sensibly whether the sketch is small or spans a large
+        // area.
+        const first = state.points[0], last = state.points[state.points.length - 1];
+        const boundsOfSketch = L.latLngBounds(state.points);
+        const diagonal = boundsOfSketch.getNorthEast().distanceTo(boundsOfSketch.getSouthWest());
+        const closureThreshold = Math.max(15, diagonal * 0.15);
+        const isClosedLoop = state.points.length >= 3 && first.distanceTo(last) <= closureThreshold;
+
+        let finalLayer;
+        if (isClosedLoop) {
+          finalLayer = L.polygon(state.points, { color: "#C4341F", weight: 3, fillOpacity: 0.15 });
+          finalLayer.__isPerimeter = true;
+          bindOrUpdatePerimeterTooltip(finalLayer, perimeterAcres(finalLayer));
+        } else {
+          finalLayer = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
+        }
+        drawnItemsRef.current.addLayer(finalLayer);
+        makeLayerMovable(finalLayer);
         persistRef.current();
       }
       freehandStateRef.current = null;
@@ -1719,7 +1741,7 @@ function TabMapping({ mapData, setMapData }) {
         </div>
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil. Drag any shape or label to reposition it — all saved automatically and shared across the board. Use <strong>Trace GPS Perimeter</strong> and walk or drive the fire's boundary — stopping the trace closes it into a shape and calculates the enclosed acreage, shown on the map and included in Print/Export. While Text Label or Freehand Draw is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
+          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil — draw a closed loop and it's treated as a perimeter with its acreage calculated automatically, same as GPS tracing below. Drag any shape or label to reposition it — all saved automatically and shared across the board. Use <strong>Trace GPS Perimeter</strong> and walk or drive the fire's boundary — stopping the trace closes it into a shape and calculates the enclosed acreage, shown on the map and included in Print/Export. While Text Label or Freehand Draw is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
           {perimeterMessage && <span style={{ color: COLORS.amber, display: "block", marginTop: 4 }}>{perimeterMessage}</span>}
         </div>
