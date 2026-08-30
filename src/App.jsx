@@ -3773,33 +3773,12 @@ function computeGeoJsonBounds(mapData) {
   return { minLat, maxLat, minLng, maxLng };
 }
 
-function renderMapSnapshotDataUri(mapData) {
-  if (!mapData || !mapData.features || mapData.features.length === 0) return null;
-  const bounds = computeGeoJsonBounds(mapData);
-  const PADDING = 40, CANVAS_W = 1000, CANVAS_H = 700;
-  const centerLat = (bounds.minLat + bounds.maxLat) / 2;
-  // Longitude degrees represent fewer real-world meters than latitude
-  // degrees do at any latitude away from the equator — this factor
-  // keeps the drawing's proportions true rather than stretched.
-  const lngScale = Math.cos(centerLat * Math.PI / 180);
-  // Floored so a single point (or a tiny cluster) doesn't blow up
-  // into an absurd zoom level with a division near zero.
-  const spanLat = Math.max(bounds.maxLat - bounds.minLat, 0.0005);
-  const spanLng = Math.max((bounds.maxLng - bounds.minLng) * lngScale, 0.0005);
-  const availW = CANVAS_W - PADDING * 2, availH = CANVAS_H - PADDING * 2;
-  const scale = Math.min(availW / spanLng, availH / spanLat); // one uniform scale for both axes — no distortion
-  const project = (lat, lng) => ({
-    x: PADDING + ((lng - bounds.minLng) * lngScale * scale) + (availW - spanLng * scale) / 2,
-    y: PADDING + ((bounds.maxLat - lat) * scale) + (availH - spanLat * scale) / 2, // north = up
-  });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = CANVAS_W;
-  canvas.height = CANVAS_H;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
+// Shared by both rendering paths below (with real map tiles, or the
+// plain vector-only fallback) — draws every feature using whatever
+// projection and radius-to-pixel conversion the caller supplies, so
+// the same drawing logic works whether the underlying scale comes
+// from a simple linear projection or a real Web Mercator zoom level.
+function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
   mapData.features.forEach(f => {
     const props = f.properties || {};
     const g = f.geometry;
@@ -3832,7 +3811,7 @@ function renderMapSnapshotDataUri(mapData) {
     } else if (g.type === "Point") {
       const p = project(g.coordinates[1], g.coordinates[0]);
       if ("radius" in props) {
-        const rPixels = (props.radius / 111320) * scale;
+        const rPixels = radiusToPixels(props.radius, g.coordinates[1]);
         ctx.beginPath();
         ctx.arc(p.x, p.y, rPixels, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(217,160,43,0.15)";
@@ -3870,13 +3849,13 @@ function renderMapSnapshotDataUri(mapData) {
       }
     }
   });
+}
 
-  // A basic north arrow for orientation, since there's no base map
-  // underneath to otherwise convey it.
+function drawNorthArrow(ctx, canvasW) {
   ctx.strokeStyle = "#5B6570";
   ctx.fillStyle = "#5B6570";
   ctx.lineWidth = 2;
-  const arrowX = CANVAS_W - 40, arrowYBottom = 55, arrowYTop = 20;
+  const arrowX = canvasW - 40, arrowYBottom = 55, arrowYTop = 20;
   ctx.beginPath();
   ctx.moveTo(arrowX, arrowYBottom);
   ctx.lineTo(arrowX, arrowYTop);
@@ -3890,8 +3869,134 @@ function renderMapSnapshotDataUri(mapData) {
   ctx.font = "bold 12px Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("N", arrowX, arrowYBottom + 16);
+}
 
+// Plain-diagram fallback — no base map, just the annotations
+// redrawn to scale on white. Always succeeds (given at least one
+// feature exists), which is why the tile-based attempt below falls
+// back to this on any failure rather than producing nothing.
+function renderMapSnapshotVectorOnly(mapData, bounds) {
+  const PADDING = 40, CANVAS_W = 1000, CANVAS_H = 700;
+  const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+  // Longitude degrees represent fewer real-world meters than latitude
+  // degrees do at any latitude away from the equator — this factor
+  // keeps the drawing's proportions true rather than stretched.
+  const lngScale = Math.cos(centerLat * Math.PI / 180);
+  // Floored so a single point (or a tiny cluster) doesn't blow up
+  // into an absurd zoom level with a division near zero.
+  const spanLat = Math.max(bounds.maxLat - bounds.minLat, 0.0005);
+  const spanLng = Math.max((bounds.maxLng - bounds.minLng) * lngScale, 0.0005);
+  const availW = CANVAS_W - PADDING * 2, availH = CANVAS_H - PADDING * 2;
+  const scale = Math.min(availW / spanLng, availH / spanLat); // one uniform scale for both axes — no distortion
+  const project = (lat, lng) => ({
+    x: PADDING + ((lng - bounds.minLng) * lngScale * scale) + (availW - spanLng * scale) / 2,
+    y: PADDING + ((bounds.maxLat - lat) * scale) + (availH - spanLat * scale) / 2, // north = up
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  drawMapFeatures(ctx, mapData, project, (meters) => (meters / 111320) * scale);
+  drawNorthArrow(ctx, CANVAS_W);
   return canvas.toDataURL("image/png");
+}
+
+function loadTileImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous"; // required for a same-origin-clean (non-tainted) canvas afterward
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("tile failed to load: " + url));
+    img.src = url;
+  });
+}
+
+// Attempts to embed the real OpenStreetMap street tiles behind the
+// drawn annotations, using Leaflet's own Web Mercator projection
+// math (L.CRS.EPSG3857) rather than reimplementing slippy-map tile
+// math independently, since that's well-established and already
+// correct. This can fail for reasons entirely outside this app's
+// control — OSM's tile servers don't reliably send the CORS header a
+// canvas needs to export an image that includes them (this has
+// reportedly changed over time and isn't something to depend on) —
+// so every failure path here returns null rather than throwing,
+// and the caller (renderMapSnapshotDataUri) falls back to the
+// tile-free diagram instead of producing nothing.
+async function renderMapSnapshotWithTiles(mapData, bounds) {
+  const TILE_SIZE = 256, CANVAS_W = 1000, CANVAS_H = 700, PADDING = 20;
+
+  let zoom = 18;
+  let nw, se;
+  for (; zoom >= 1; zoom--) {
+    nw = L.CRS.EPSG3857.latLngToPoint(L.latLng(bounds.maxLat, bounds.minLng), zoom);
+    se = L.CRS.EPSG3857.latLngToPoint(L.latLng(bounds.minLat, bounds.maxLng), zoom);
+    if (se.x - nw.x <= CANVAS_W - PADDING * 2 && se.y - nw.y <= CANVAS_H - PADDING * 2) break;
+  }
+  const boxW = se.x - nw.x, boxH = se.y - nw.y;
+  const originX = nw.x - (CANVAS_W - boxW) / 2;
+  const originY = nw.y - (CANVAS_H - boxH) / 2;
+
+  const maxTileIndex = Math.pow(2, zoom) - 1;
+  const firstTileX = Math.max(0, Math.floor(originX / TILE_SIZE));
+  const firstTileY = Math.max(0, Math.floor(originY / TILE_SIZE));
+  const lastTileX = Math.min(maxTileIndex, Math.floor((originX + CANVAS_W) / TILE_SIZE));
+  const lastTileY = Math.min(maxTileIndex, Math.floor((originY + CANVAS_H) / TILE_SIZE));
+
+  const tileRequests = [];
+  for (let tx = firstTileX; tx <= lastTileX; tx++) {
+    for (let ty = firstTileY; ty <= lastTileY; ty++) {
+      const url = `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
+      tileRequests.push(
+        loadTileImage(url)
+          .then(img => ({ img, px: tx * TILE_SIZE - originX, py: ty * TILE_SIZE - originY }))
+          .catch(() => null)
+      );
+    }
+  }
+  const tiles = await Promise.all(tileRequests);
+  if (tiles.every(t => !t)) return null; // every tile failed — nothing worth keeping
+
+  const canvas = document.createElement("canvas");
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  tiles.forEach(t => { if (t) ctx.drawImage(t.img, t.px, t.py); });
+
+  const project = (lat, lng) => {
+    const pt = L.CRS.EPSG3857.latLngToPoint(L.latLng(lat, lng), zoom);
+    return { x: pt.x - originX, y: pt.y - originY };
+  };
+  // Standard Web Mercator meters-per-pixel formula at this zoom/latitude.
+  const radiusToPixels = (meters, lat) => meters / (156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom));
+  drawMapFeatures(ctx, mapData, project, radiusToPixels);
+  drawNorthArrow(ctx, CANVAS_W);
+
+  try {
+    return canvas.toDataURL("image/png");
+  } catch {
+    // A tile that silently failed CORS would "taint" the canvas —
+    // export throwing here is the actual, definitive signal of that,
+    // more reliable than trying to detect it any other way.
+    return null;
+  }
+}
+
+async function renderMapSnapshotDataUri(mapData) {
+  if (!mapData || !mapData.features || mapData.features.length === 0) return null;
+  const bounds = computeGeoJsonBounds(mapData);
+  try {
+    const withTiles = await renderMapSnapshotWithTiles(mapData, bounds);
+    if (withTiles) return withTiles;
+  } catch {
+    // fall through to the reliable fallback below
+  }
+  return renderMapSnapshotVectorOnly(mapData, bounds);
 }
 
 function loadLogoRGB(dataUri, maxDim = 130) {
@@ -3942,7 +4047,7 @@ async function downloadPacketPdf(data) {
   // under "Incident Perimeter" — see the comment on
   // renderMapSnapshotDataUri for why this redraws just the
   // annotations rather than exporting the live map with its tiles.
-  const mapSnapshotDataUri = renderMapSnapshotDataUri(parseMapData(data.mapData));
+  const mapSnapshotDataUri = await renderMapSnapshotDataUri(parseMapData(data.mapData));
   const mapSnapshotImage = mapSnapshotDataUri ? await loadLogoRGB(mapSnapshotDataUri, 1400) : null;
   for (const a of imageAttachments) {
     const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
