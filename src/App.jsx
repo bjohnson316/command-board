@@ -4594,6 +4594,17 @@ function GlobalStyles() {
       input[type="date"], input[type="time"], input[type="datetime-local"] {
         color-scheme: var(--cb-picker-scheme);
       }
+      /* iOS/iPadOS Safari centers the displayed value inside date/time
+         inputs by default (via this internal pseudo-element), unlike
+         every other browser (and every other input type in this app),
+         which left-align it — this forces the same left alignment
+         Safari already uses everywhere else, so these fields don't
+         stand out as different on an iPad. */
+      input[type="date"]::-webkit-date-and-time-value,
+      input[type="time"]::-webkit-date-and-time-value,
+      input[type="datetime-local"]::-webkit-date-and-time-value {
+        text-align: left;
+      }
       ::-webkit-scrollbar { height: 8px; width: 8px; }
       ::-webkit-scrollbar-thumb { background: ${COLORS.line}; border-radius: 4px; }
       .print-only { display: none; }
