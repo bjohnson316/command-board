@@ -17,7 +17,6 @@ import PinGate from "./PinGate.jsx";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
-import "leaflet-path-drag"; // adds whole-shape drag-to-move for vector layers (polylines, polygons, circles) — Leaflet markers can already be dragged natively, this extends the same idea to everything else drawn on the map
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw/dist/leaflet.draw.css";
 // Leaflet's default marker icon paths break under Vite's bundling
@@ -1215,35 +1214,17 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
    internal state (pan/zoom/drawn layers) doesn't need to live in
    React at all — only the saved GeoJSON does.
    ============================================================ */
-// Enables drag-to-move on any layer this app draws. Markers already
-// have a .dragging handler built into Leaflet core; vector layers
-// (polylines, polygons, circles, rectangles) need it added via
-// leaflet-path-drag's makeDraggable() retrofit method specifically —
-// the plugin's automatic activation only fires for layers actually
-// *constructed* with { draggable: true }, which doesn't cover
-// anything leaflet-draw itself creates through its own toolbar, since
-// this app doesn't control that constructor call. Moving a shape
-// re-saves it the same way editing or deleting one does.
-function enableLayerDragging(layer, onMoved) {
-  if (layer instanceof L.Marker) {
-    layer.dragging.enable();
-  } else if (layer instanceof L.Path) {
-    if (!layer.dragging) layer.makeDraggable();
-    layer.dragging.enable();
-  }
-  layer.on("dragend", onMoved);
-}
-
 // Shared between the initial load and the periodic sync poll below —
 // reconstructs the right layer type for a saved Point feature: a real
 // Circle (with its saved radius) if the feature has a radius
 // property, a styled text label if it has a textLabel property,
 // otherwise a plain marker. Both properties have to be added manually
 // on save since GeoJSON's Point geometry alone can't carry them (see
-// persist() inside TabMapping). Also re-enables dragging on every
-// reconstructed layer, since that's a runtime capability that doesn't
-// survive a save/reload cycle on its own.
-function loadGeoJsonIntoGroup(featureGroup, geojson, onMoved) {
+// persist() inside TabMapping). makeLayerMovable is passed in from
+// the component (it needs access to editingActiveRef/setIsMovingShape)
+// and re-wires drag-to-move on every reconstructed layer, since that
+// capability doesn't survive a save/reload cycle on its own.
+function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
       const props = feature.properties || {};
@@ -1253,8 +1234,26 @@ function loadGeoJsonIntoGroup(featureGroup, geojson, onMoved) {
     },
   }).eachLayer(layer => {
     featureGroup.addLayer(layer);
-    enableLayerDragging(layer, onMoved);
+    makeLayerMovable(layer);
   });
+}
+
+// Layer-type-agnostic coordinate helpers for whole-shape dragging —
+// a marker/circle has a single LatLng (getLatLng/setLatLng), while a
+// polyline/polygon/rectangle has an array of them, possibly nested
+// for multi-ring shapes (getLatLngs/setLatLngs). offsetLatLngs walks
+// that structure recursively so the same translation logic works for
+// every shape type without special-casing each one.
+function getLayerLatLngs(layer) {
+  return layer.getLatLngs ? layer.getLatLngs() : layer.getLatLng();
+}
+function setLayerLatLngs(layer, latlngs) {
+  if (layer.setLatLngs) layer.setLatLngs(latlngs);
+  else layer.setLatLng(latlngs);
+}
+function offsetLatLngs(latlngs, dLat, dLng) {
+  if (Array.isArray(latlngs)) return latlngs.map(item => offsetLatLngs(item, dLat, dLng));
+  return L.latLng(latlngs.lat + dLat, latlngs.lng + dLng);
 }
 
 function TabMapping({ mapData, setMapData }) {
@@ -1266,6 +1265,7 @@ function TabMapping({ mapData, setMapData }) {
   const gpsAccuracyRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
   const freehandStateRef = useRef(null); // { points, tempLine } while actively drawing
+  const movingLayerRef = useRef(null); // { layer, startLatLng, originalLatLngs } while dragging an existing shape/label
   const editingActiveRef = useRef(false); // true while leaflet-draw's own edit/delete mode is active
   const latestMapDataRef = useRef(mapData); // mirrors the mapData prop for use inside the poll's setInterval closure
   const lastSyncedMapDataRef = useRef(null); // JSON string of whatever drawnItems currently reflects
@@ -1274,9 +1274,31 @@ function TabMapping({ mapData, setMapData }) {
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
   const [textPrompt, setTextPrompt] = useState(null); // { latlng, value } while the text-label dialog is open
+  const [isMovingShape, setIsMovingShape] = useState(false); // true while an existing shape/label is being dragged
 
   useEffect(() => { latestMapDataRef.current = mapData; }, [mapData]);
   useEffect(() => { textPromptOpenRef.current = !!textPrompt; }, [textPrompt]);
+
+  // Wires up whole-shape drag-to-move on a layer. Built on the same
+  // technique as the freehand tool below (a transparent overlay using
+  // React's own pointer events) rather than the leaflet-path-drag
+  // plugin an earlier version of this used — that plugin worked
+  // reliably with a mouse but not on an iPhone, and since it's a
+  // third-party library's own internal event handling, there was no
+  // way to fix its touch behavior directly. This starts the same way
+  // dragging always has to for something Leaflet already renders:
+  // Leaflet's own per-layer "mousedown" event (reliable across mouse
+  // and touch, since it's core Leaflet functionality, not a plugin)
+  // detects which shape was grabbed and hands off to the overlay
+  // below to track the rest of the gesture.
+  const makeLayerMovable = (layer) => {
+    layer.on("mousedown", (e) => {
+      if (editingActiveRef.current) return; // don't fight leaflet-draw's own vertex-reshape mode
+      L.DomEvent.stop(e); // don't also start a map pan from the same press
+      movingLayerRef.current = { layer, startLatLng: e.latlng, originalLatLngs: getLayerLatLngs(layer) };
+      setIsMovingShape(true);
+    });
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -1333,7 +1355,7 @@ function TabMapping({ mapData, setMapData }) {
     persistRef.current = persist;
 
     if (mapData && mapData.features && mapData.features.length > 0) {
-      loadGeoJsonIntoGroup(drawnItems, mapData, persist);
+      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable);
     }
     lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
@@ -1351,24 +1373,16 @@ function TabMapping({ mapData, setMapData }) {
     });
     map.addControl(drawControl);
 
-    // While leaflet-draw's own edit or delete mode is active, drag-
-    // to-move is turned off for every shape — leaving it on at the
-    // same time as leaflet-draw's own vertex-editing handles would
-    // mean a click on the shape body could ambiguously either move
-    // the whole thing or start reshaping it. The sync poll further
-    // below is paused for the same window for the same underlying
-    // reason: don't fight an in-progress edit.
-    map.on(L.Draw.Event.EDITSTART, () => {
-      editingActiveRef.current = true;
-      drawnItems.eachLayer(layer => { if (layer.dragging) layer.dragging.disable(); });
-    });
-    map.on(L.Draw.Event.EDITSTOP, () => {
-      editingActiveRef.current = false;
-      drawnItems.eachLayer(layer => { if (layer.dragging) layer.dragging.enable(); });
-    });
+    // While leaflet-draw's own edit or delete mode is active,
+    // makeLayerMovable's own "mousedown" handler already declines to
+    // start a move (see editingActiveRef check above) — this just
+    // tracks that flag and also pauses the sync poll further below
+    // for the same underlying reason: don't fight an in-progress edit.
+    map.on(L.Draw.Event.EDITSTART, () => { editingActiveRef.current = true; });
+    map.on(L.Draw.Event.EDITSTOP, () => { editingActiveRef.current = false; });
     map.on(L.Draw.Event.DELETESTART, () => { editingActiveRef.current = true; });
     map.on(L.Draw.Event.DELETESTOP, () => { editingActiveRef.current = false; });
-    map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); enableLayerDragging(e.layer, persist); persist(); });
+    map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); makeLayerMovable(e.layer); persist(); });
     map.on(L.Draw.Event.EDITED, persist);
     map.on(L.Draw.Event.DELETED, persist);
 
@@ -1396,18 +1410,19 @@ function TabMapping({ mapData, setMapData }) {
     // doesn't get applied mid-gesture — the guards below skip a tick
     // entirely (trying again on the next one) rather than risk
     // pulling a shape out from under an in-progress freehand stroke,
-    // an open text-label prompt, or leaflet-draw's own edit/delete
-    // mode. Comparing against lastSyncedMapDataRef (rather than just
-    // "did the prop change") also means this device's own edits,
-    // which already recorded themselves there in persist() above,
-    // don't trigger a pointless reload of what it just drew itself.
+    // an open text-label prompt, a shape currently being dragged, or
+    // leaflet-draw's own edit/delete mode. Comparing against
+    // lastSyncedMapDataRef (rather than just "did the prop change")
+    // also means this device's own edits, which already recorded
+    // themselves there in persist() above, don't trigger a pointless
+    // reload of what it just drew itself.
     const syncInterval = setInterval(() => {
-      if (freehandStateRef.current || textPromptOpenRef.current || editingActiveRef.current) return;
+      if (freehandStateRef.current || textPromptOpenRef.current || editingActiveRef.current || movingLayerRef.current) return;
       const incomingJson = JSON.stringify(latestMapDataRef.current);
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
       if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
-        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, persist);
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable);
       }
       lastSyncedMapDataRef.current = incomingJson;
     }, 5000);
@@ -1428,22 +1443,28 @@ function TabMapping({ mapData, setMapData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Text-label and freehand tools are implemented via a transparent
-  // overlay element placed on top of the map (rendered below, only
-  // while one of these tools is armed) using REACT's own pointer
-  // event props — not Leaflet's event system, and not raw DOM
+  // Text-label, freehand, and whole-shape-move all funnel through
+  // this one transparent overlay placed on top of the map — rendered
+  // below, only while one of the three is active — using React's own
+  // pointer event props rather than Leaflet's event system or raw DOM
   // listeners attached to the map's own container.
   //
-  // Two earlier versions of this tried both of those approaches and
-  // each behaved inconsistently across devices in a way that didn't
-  // point to a single clean cause (one browser's tap/click synthesis
-  // working, another's not) — the common thread was competing with
-  // Leaflet's own extensive internal event handling on that same
-  // container element. A separate overlay sidesteps that completely:
-  // it's a different DOM element Leaflet never sees, so there's
-  // nothing for these tools' events to conflict with, and React's
-  // pointer event system is normalized consistently across mouse,
-  // touch, and pen input by the browser itself.
+  // Two earlier versions of text/freehand placement tried both of
+  // those other approaches and each behaved inconsistently across
+  // devices in a way that didn't point to a single clean cause (one
+  // browser's tap/click synthesis working, another's not) — the
+  // common thread was competing with Leaflet's own extensive internal
+  // event handling on that same container element. A separate overlay
+  // sidesteps that completely: it's a different DOM element Leaflet
+  // never sees, so there's nothing for these interactions to conflict
+  // with, and React's pointer event system is normalized consistently
+  // across mouse, touch, and pen input by the browser itself. The
+  // whole-shape-move feature below reuses the same overlay for
+  // exactly this reason, after a version built on a third-party drag
+  // plugin turned out reliable with a mouse but not on an iPhone —
+  // a library's own internal event handling isn't something that can
+  // be fixed from the outside, so this replaces it entirely with the
+  // same technique already proven here.
   const overlayToLatLng = (e) => {
     const rect = containerRef.current.getBoundingClientRect();
     return mapRef.current.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
@@ -1454,10 +1475,7 @@ function TabMapping({ mapData, setMapData }) {
   // click event already only fires when there's no significant
   // movement between press and release; that's true for any ordinary
   // DOM element and has nothing to do with Leaflet, since this
-  // overlay is a plain div Leaflet doesn't know exists. An earlier
-  // version reimplemented that distinction manually, which turned out
-  // less reliable than just trusting the browser to do what it
-  // already does correctly and consistently across devices.
+  // overlay is a plain div Leaflet doesn't know exists.
   const handleOverlayClick = (e) => {
     if (activeTool !== "text") return;
     try {
@@ -1470,8 +1488,9 @@ function TabMapping({ mapData, setMapData }) {
     }
   };
 
-  // Freehand still needs real pointer tracking, since it has to
-  // follow the drag continuously rather than just detect its end.
+  // Freehand and whole-shape-move both need real pointer tracking,
+  // since each has to follow the drag continuously rather than just
+  // detect its end.
   const handleOverlayPointerDown = (e) => {
     if (activeTool !== "freehand") return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -1480,6 +1499,13 @@ function TabMapping({ mapData, setMapData }) {
     freehandStateRef.current = { points: [start], tempLine };
   };
   const handleOverlayPointerMove = (e) => {
+    if (movingLayerRef.current) {
+      const current = overlayToLatLng(e);
+      const dLat = current.lat - movingLayerRef.current.startLatLng.lat;
+      const dLng = current.lng - movingLayerRef.current.startLatLng.lng;
+      setLayerLatLngs(movingLayerRef.current.layer, offsetLatLngs(movingLayerRef.current.originalLatLngs, dLat, dLng));
+      return;
+    }
     if (activeTool === "freehand" && freehandStateRef.current) {
       const pt = overlayToLatLng(e);
       freehandStateRef.current.points.push(pt);
@@ -1487,13 +1513,19 @@ function TabMapping({ mapData, setMapData }) {
     }
   };
   const handleOverlayPointerUp = () => {
+    if (movingLayerRef.current) {
+      movingLayerRef.current = null;
+      setIsMovingShape(false);
+      persistRef.current();
+      return;
+    }
     if (activeTool === "freehand" && freehandStateRef.current) {
       const state = freehandStateRef.current;
       mapRef.current.removeLayer(state.tempLine);
       if (state.points.length > 1) {
         const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
         drawnItemsRef.current.addLayer(finalLine);
-        enableLayerDragging(finalLine, () => persistRef.current());
+        makeLayerMovable(finalLine);
         persistRef.current();
       }
       freehandStateRef.current = null;
@@ -1507,7 +1539,7 @@ function TabMapping({ mapData, setMapData }) {
     const marker = L.marker(textPrompt.latlng, { icon: makeTextIcon(text) });
     marker.__textLabel = text; // read by persist() above to save it back out
     drawnItemsRef.current.addLayer(marker);
-    enableLayerDragging(marker, () => persistRef.current());
+    makeLayerMovable(marker);
     persistRef.current();
   };
 
@@ -1564,14 +1596,20 @@ function TabMapping({ mapData, setMapData }) {
         </div>
         <div style={{ position: "relative" }}>
           <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
-          {(activeTool === "text" || activeTool === "freehand") && (
+          {(activeTool === "text" || activeTool === "freehand" || isMovingShape) && (
             <div
               onClick={handleOverlayClick}
               onPointerDown={handleOverlayPointerDown}
               onPointerMove={handleOverlayPointerMove}
               onPointerUp={handleOverlayPointerUp}
               onPointerCancel={handleOverlayPointerUp}
-              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000, border: `2px solid ${COLORS.amber}`, boxSizing: "border-box" }}
+              style={{
+                position: "absolute", inset: 0,
+                cursor: isMovingShape ? "grabbing" : "crosshair",
+                touchAction: "none", zIndex: 1000,
+                border: activeTool ? `2px solid ${COLORS.amber}` : "none",
+                boxSizing: "border-box",
+              }}
             />
           )}
         </div>
