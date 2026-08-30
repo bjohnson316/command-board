@@ -1294,7 +1294,19 @@ function TabMapping({ mapData, setMapData }) {
   const makeLayerMovable = (layer) => {
     layer.on("mousedown", (e) => {
       if (editingActiveRef.current) return; // don't fight leaflet-draw's own vertex-reshape mode
-      L.DomEvent.stop(e); // don't also start a map pan from the same press
+      // Operating on e.originalEvent (the real DOM event), not e
+      // itself (Leaflet's wrapper object around it) — the wrapper
+      // has no real preventDefault of its own, so stopping it doesn't
+      // actually suppress the map's own pan handler starting at the
+      // same time, which was exactly the bug: the shape moved AND the
+      // whole map panned from the same press.
+      L.DomEvent.stop(e.originalEvent);
+      // Belt-and-suspenders alongside the line above, not a
+      // replacement for it — explicitly disabling map dragging for
+      // the duration of the move guarantees no simultaneous pan
+      // regardless of any event-propagation subtlety, the same way
+      // the freehand tool already disables it while sketching.
+      if (mapRef.current) mapRef.current.dragging.disable();
       movingLayerRef.current = { layer, startLatLng: e.latlng, originalLatLngs: getLayerLatLngs(layer) };
       setIsMovingShape(true);
     });
@@ -1515,6 +1527,7 @@ function TabMapping({ mapData, setMapData }) {
   const handleOverlayPointerUp = () => {
     if (movingLayerRef.current) {
       movingLayerRef.current = null;
+      if (mapRef.current) mapRef.current.dragging.enable();
       setIsMovingShape(false);
       persistRef.current();
       return;
