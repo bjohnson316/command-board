@@ -174,6 +174,9 @@ const nowISO = () => new Date().toISOString();
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
 const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString() : "—";
+// 8-point compass, matching the format the Wind field already
+// expects ("8 mph SW") rather than a finer-grained 16-point compass.
+const degreesToCompass = (deg) => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 const elapsed = (iso, now) => {
   if (!iso) return "—";
   let s = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
@@ -485,6 +488,37 @@ function Panel({ title, icon: Icon, right, children, style }) {
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
 function Tab201({ incident, setIncident, resources, objectivePresets, onSavePreset }) {
+  const [weatherStatus, setWeatherStatus] = useState(""); // "", "loading", or an error message
+  const fetchCurrentWeather = () => {
+    if (!navigator.geolocation) { setWeatherStatus("This device/browser doesn't support GPS location."); return; }
+    setWeatherStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords;
+          // Open-Meteo — free, no API key or account required, built
+          // for exactly this kind of direct browser-side use.
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Weather service returned an error.");
+          const data = await res.json();
+          const c = data.current;
+          setIncident(inc => ({
+            ...inc,
+            wind: `${Math.round(c.wind_speed_10m)} mph ${degreesToCompass(c.wind_direction_10m)}`,
+            temp: `${Math.round(c.temperature_2m)}°F`,
+            rh: `${Math.round(c.relative_humidity_2m)}%`,
+          }));
+          setWeatherStatus("");
+        } catch (err) {
+          setWeatherStatus("Couldn't fetch weather data. Check your connection and try again.");
+        }
+      },
+      (err) => setWeatherStatus(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
+      { enableHighAccuracy: false, maximumAge: 300000 } // weather doesn't need pinpoint accuracy, and a 5-minute-old fix is fine
+    );
+  };
+
   const updateObjective = (i, val) => {
     const next = [...incident.objectives]; next[i] = val;
     setIncident({ ...incident, objectives: next });
@@ -523,7 +557,15 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
           <Field label="Incident Commander"><TextInput value={incident.icName} onChange={e => setIncident({ ...incident, icName: e.target.value })} /></Field>
         </div>
 
-        <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 4px" }}>Field Conditions (not on official form — quick reference)</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "16px 0 4px" }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>Weather Conditions</div>
+          <Btn kind="subtle" icon={Crosshair} onClick={fetchCurrentWeather} disabled={weatherStatus === "loading"} style={{ padding: "4px 10px", fontSize: 11.5 }}>
+            {weatherStatus === "loading" ? "Fetching..." : "Get Current Weather"}
+          </Btn>
+        </div>
+        {weatherStatus && weatherStatus !== "loading" && (
+          <div style={{ fontSize: 11.5, color: COLORS.dangerText, marginBottom: 6 }}>{weatherStatus}</div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
           <Field label="Wind"><TextInput value={incident.wind} onChange={e => setIncident({ ...incident, wind: e.target.value })} placeholder="8 mph SW" /></Field>
           <Field label="Temp"><TextInput value={incident.temp} onChange={e => setIncident({ ...incident, temp: e.target.value })} placeholder="72°F" /></Field>
