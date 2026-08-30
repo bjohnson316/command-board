@@ -434,6 +434,8 @@ const inputStyle = {
   color: COLORS.text,
   padding: "8px 10px",
   fontSize: 14,
+  lineHeight: "20px",
+  height: 38,
   fontFamily: "'IBM Plex Sans', sans-serif",
   outline: "none",
 };
@@ -441,7 +443,7 @@ function TextInput(props) {
   return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} />;
 }
 function TextArea(props) {
-  return <textarea {...props} style={{ ...inputStyle, resize: "vertical", minHeight: 70, ...(props.style || {}) }} />;
+  return <textarea {...props} style={{ ...inputStyle, height: "auto", resize: "vertical", minHeight: 70, ...(props.style || {}) }} />;
 }
 function Select({ children, ...props }) {
   return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }}>{children}</select>;
