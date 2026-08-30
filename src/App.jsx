@@ -575,7 +575,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         {weatherStatus && weatherStatus !== "loading" && (
           <div style={{ fontSize: 11.5, color: COLORS.dangerText, marginBottom: 6 }}>{weatherStatus}</div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 14 }}>
           <Field label="Wind"><TextInput value={incident.wind} onChange={e => setIncident({ ...incident, wind: e.target.value })} placeholder="8 mph SW" /></Field>
           <Field label="Temp"><TextInput value={incident.temp} onChange={e => setIncident({ ...incident, temp: e.target.value })} placeholder="72°F" /></Field>
           <Field label="RH"><TextInput value={incident.rh} onChange={e => setIncident({ ...incident, rh: e.target.value })} placeholder="45%" /></Field>
