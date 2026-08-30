@@ -479,7 +479,16 @@ function Panel({ title, icon: Icon, right, children, style }) {
           {right}
         </div>
       )}
-      <div style={{ padding: 16 }}>{children}</div>
+      {/* overflowX here (not shrinking every field down to fit) is
+          what makes wide multi-column layouts — the Tactical
+          Worksheet's field grids, ICS form tables, etc. — reachable
+          by swiping sideways on a narrow phone screen instead of
+          silently clipping whatever doesn't fit, or squeezing fields
+          down to an unusable width. Since this is the one wrapper
+          nearly every section in the app renders its content inside,
+          fixing it here covers all of them at once rather than
+          needing a scroll container added to each individual grid. */}
+      <div style={{ padding: 16, overflowX: "auto" }}>{children}</div>
     </div>
   );
 }
