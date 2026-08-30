@@ -4631,6 +4631,16 @@ function GlobalStyles() {
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
       ${THEME_CSS}
       * { box-sizing: border-box; }
+      html {
+        /* iOS Safari automatically boosts font sizes when it judges
+           the viewport "wide enough" — most noticeably right after
+           rotating to landscape — on the assumption that's helping
+           readability. This turns that off explicitly so text stays
+           the size the CSS actually specifies, regardless of device
+           orientation. */
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
       html, body, #root { margin: 0; padding: 0; min-height: 100%; background: ${COLORS.bg}; }
       select { -webkit-appearance: none; }
       input:focus, textarea:focus, select:focus { border-color: ${COLORS.amber} !important; }
