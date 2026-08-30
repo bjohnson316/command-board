@@ -1214,6 +1214,24 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
    internal state (pan/zoom/drawn layers) doesn't need to live in
    React at all — only the saved GeoJSON does.
    ============================================================ */
+// Shared between the initial load and the periodic sync poll below —
+// reconstructs the right layer type for a saved Point feature: a real
+// Circle (with its saved radius) if the feature has a radius
+// property, a styled text label if it has a textLabel property,
+// otherwise a plain marker. Both properties have to be added manually
+// on save since GeoJSON's Point geometry alone can't carry them (see
+// persist() inside TabMapping).
+function loadGeoJsonIntoGroup(featureGroup, geojson) {
+  L.geoJSON(geojson, {
+    pointToLayer: (feature, latlng) => {
+      const props = feature.properties || {};
+      if ("radius" in props) return L.circle(latlng, { radius: props.radius });
+      if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
+      return L.marker(latlng);
+    },
+  }).eachLayer(layer => featureGroup.addLayer(layer));
+}
+
 function TabMapping({ mapData, setMapData }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -1223,10 +1241,17 @@ function TabMapping({ mapData, setMapData }) {
   const gpsAccuracyRef = useRef(null);
   const gpsWatchIdRef = useRef(null);
   const freehandStateRef = useRef(null); // { points, tempLine } while actively drawing
+  const editingActiveRef = useRef(false); // true while leaflet-draw's own edit/delete mode is active
+  const latestMapDataRef = useRef(mapData); // mirrors the mapData prop for use inside the poll's setInterval closure
+  const lastSyncedMapDataRef = useRef(null); // JSON string of whatever drawnItems currently reflects
+  const textPromptOpenRef = useRef(false); // mirrors textPrompt state, for the same reason as latestMapDataRef
   const [tracking, setTracking] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
   const [textPrompt, setTextPrompt] = useState(null); // { latlng, value } while the text-label dialog is open
+
+  useEffect(() => { latestMapDataRef.current = mapData; }, [mapData]);
+  useEffect(() => { textPromptOpenRef.current = !!textPrompt; }, [textPrompt]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -1252,21 +1277,9 @@ function TabMapping({ mapData, setMapData }) {
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
     if (mapData && mapData.features && mapData.features.length > 0) {
-      // pointToLayer reconstructs the right marker type for a saved
-      // Point feature: a real Circle (with its saved radius) if the
-      // feature has a radius property, a styled text label if it has
-      // a textLabel property, otherwise a plain marker. Both radius
-      // and textLabel have to be added manually on save (see persist
-      // below) since GeoJSON's Point geometry alone can't carry them.
-      L.geoJSON(mapData, {
-        pointToLayer: (feature, latlng) => {
-          const props = feature.properties || {};
-          if ("radius" in props) return L.circle(latlng, { radius: props.radius });
-          if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
-          return L.marker(latlng);
-        },
-      }).eachLayer(layer => drawnItems.addLayer(layer));
+      loadGeoJsonIntoGroup(drawnItems, mapData);
     }
+    lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
     const drawControl = new L.Control.Draw({
       position: "topleft",
@@ -1281,6 +1294,15 @@ function TabMapping({ mapData, setMapData }) {
       edit: { featureGroup: drawnItems },
     });
     map.addControl(drawControl);
+
+    // While leaflet-draw's own edit or delete mode is active, the
+    // periodic sync poll below must not touch drawnItems — replacing
+    // its layers out from under an in-progress vertex drag would
+    // disrupt (or lose) that edit.
+    map.on(L.Draw.Event.EDITSTART, () => { editingActiveRef.current = true; });
+    map.on(L.Draw.Event.EDITSTOP, () => { editingActiveRef.current = false; });
+    map.on(L.Draw.Event.DELETESTART, () => { editingActiveRef.current = true; });
+    map.on(L.Draw.Event.DELETESTOP, () => { editingActiveRef.current = false; });
 
     // Rebuilt per-layer rather than pairing up two separate calls to
     // toGeoJSON() and eachLayer() by array index — that pairing
@@ -1298,7 +1320,13 @@ function TabMapping({ mapData, setMapData }) {
         if (layer.__textLabel) feature.properties = { ...feature.properties, textLabel: layer.__textLabel };
         features.push(feature);
       });
-      setMapData({ type: "FeatureCollection", features });
+      const newData = { type: "FeatureCollection", features };
+      // This IS the latest known state — recording it here means the
+      // sync poll won't mistake the echo of our own save for an
+      // incoming remote change and needlessly reload what we just
+      // drew.
+      lastSyncedMapDataRef.current = JSON.stringify(newData);
+      setMapData(newData);
     };
     persistRef.current = persist;
     map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); persist(); });
@@ -1323,16 +1351,41 @@ function TabMapping({ mapData, setMapData }) {
       }
     }, 100);
 
+    // Picks up other devices' edits without needing to leave and
+    // re-enter this tab. Checked every 5 seconds rather than reacting
+    // live to every mapData prop change, specifically so a change
+    // doesn't get applied mid-gesture — the guards below skip a tick
+    // entirely (trying again on the next one) rather than risk
+    // pulling a shape out from under an in-progress freehand stroke,
+    // an open text-label prompt, or leaflet-draw's own edit/delete
+    // mode. Comparing against lastSyncedMapDataRef (rather than just
+    // "did the prop change") also means this device's own edits,
+    // which already recorded themselves there in persist() above,
+    // don't trigger a pointless reload of what it just drew itself.
+    const syncInterval = setInterval(() => {
+      if (freehandStateRef.current || textPromptOpenRef.current || editingActiveRef.current) return;
+      const incomingJson = JSON.stringify(latestMapDataRef.current);
+      if (incomingJson === lastSyncedMapDataRef.current) return;
+      drawnItems.clearLayers();
+      if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current);
+      }
+      lastSyncedMapDataRef.current = incomingJson;
+    }, 5000);
+
     return () => {
+      clearInterval(syncInterval);
       if (gpsWatchIdRef.current != null) navigator.geolocation.clearWatch(gpsWatchIdRef.current);
       map.remove();
       mapRef.current = null;
     };
-    // Intentionally mount-once: mapData is only read here as the
-    // initial state (see the component comment above) — external
-    // updates from other devices show up next time this tab mounts,
-    // not live while it's already open, to avoid fighting an
-    // in-progress local edit with an incoming remote one.
+    // Intentionally mount-once for the map/layers/controls themselves
+    // — mapData is only read here as the initial state. Updates from
+    // other devices while this tab stays open are now handled by the
+    // 5-second sync poll above instead, which is deliberately
+    // separate from this effect's dependencies so it can apply its
+    // own guards (skip a tick rather than fight an in-progress local
+    // edit) instead of naively reloading on every prop change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
