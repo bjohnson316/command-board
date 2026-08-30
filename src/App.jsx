@@ -17,6 +17,7 @@ import PinGate from "./PinGate.jsx";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
+import "leaflet-path-drag"; // adds whole-shape drag-to-move for vector layers (polylines, polygons, circles) — Leaflet markers can already be dragged natively, this extends the same idea to everything else drawn on the map
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw/dist/leaflet.draw.css";
 // Leaflet's default marker icon paths break under Vite's bundling
@@ -1214,14 +1215,35 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
    internal state (pan/zoom/drawn layers) doesn't need to live in
    React at all — only the saved GeoJSON does.
    ============================================================ */
+// Enables drag-to-move on any layer this app draws. Markers already
+// have a .dragging handler built into Leaflet core; vector layers
+// (polylines, polygons, circles, rectangles) need it added via
+// leaflet-path-drag's makeDraggable() retrofit method specifically —
+// the plugin's automatic activation only fires for layers actually
+// *constructed* with { draggable: true }, which doesn't cover
+// anything leaflet-draw itself creates through its own toolbar, since
+// this app doesn't control that constructor call. Moving a shape
+// re-saves it the same way editing or deleting one does.
+function enableLayerDragging(layer, onMoved) {
+  if (layer instanceof L.Marker) {
+    layer.dragging.enable();
+  } else if (layer instanceof L.Path) {
+    if (!layer.dragging) layer.makeDraggable();
+    layer.dragging.enable();
+  }
+  layer.on("dragend", onMoved);
+}
+
 // Shared between the initial load and the periodic sync poll below —
 // reconstructs the right layer type for a saved Point feature: a real
 // Circle (with its saved radius) if the feature has a radius
 // property, a styled text label if it has a textLabel property,
 // otherwise a plain marker. Both properties have to be added manually
 // on save since GeoJSON's Point geometry alone can't carry them (see
-// persist() inside TabMapping).
-function loadGeoJsonIntoGroup(featureGroup, geojson) {
+// persist() inside TabMapping). Also re-enables dragging on every
+// reconstructed layer, since that's a runtime capability that doesn't
+// survive a save/reload cycle on its own.
+function loadGeoJsonIntoGroup(featureGroup, geojson, onMoved) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
       const props = feature.properties || {};
@@ -1229,7 +1251,10 @@ function loadGeoJsonIntoGroup(featureGroup, geojson) {
       if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
       return L.marker(latlng);
     },
-  }).eachLayer(layer => featureGroup.addLayer(layer));
+  }).eachLayer(layer => {
+    featureGroup.addLayer(layer);
+    enableLayerDragging(layer, onMoved);
+  });
 }
 
 function TabMapping({ mapData, setMapData }) {
@@ -1276,34 +1301,11 @@ function TabMapping({ mapData, setMapData }) {
     const drawnItems = new L.FeatureGroup();
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
-    if (mapData && mapData.features && mapData.features.length > 0) {
-      loadGeoJsonIntoGroup(drawnItems, mapData);
-    }
-    lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
-    const drawControl = new L.Control.Draw({
-      position: "topleft",
-      draw: {
-        polygon: { shapeOptions: { color: "#C4341F" } }, // fire perimeter / hazard zones
-        polyline: { shapeOptions: { color: "#3B6FA6" } }, // hose lays, access routes
-        rectangle: { shapeOptions: { color: "#D9A02B" } },
-        circle: { shapeOptions: { color: "#D9A02B" } }, // hazard radius
-        marker: true,
-        circlemarker: false,
-      },
-      edit: { featureGroup: drawnItems },
-    });
-    map.addControl(drawControl);
-
-    // While leaflet-draw's own edit or delete mode is active, the
-    // periodic sync poll below must not touch drawnItems — replacing
-    // its layers out from under an in-progress vertex drag would
-    // disrupt (or lose) that edit.
-    map.on(L.Draw.Event.EDITSTART, () => { editingActiveRef.current = true; });
-    map.on(L.Draw.Event.EDITSTOP, () => { editingActiveRef.current = false; });
-    map.on(L.Draw.Event.DELETESTART, () => { editingActiveRef.current = true; });
-    map.on(L.Draw.Event.DELETESTOP, () => { editingActiveRef.current = false; });
-
+    // Defined before the initial load below, since loading saved
+    // shapes back in also needs to wire up drag-to-move on each one,
+    // which re-saves via this same function.
+    //
     // Rebuilt per-layer rather than pairing up two separate calls to
     // toGeoJSON() and eachLayer() by array index — that pairing
     // assumed both would iterate drawnItems in the exact same order,
@@ -1329,7 +1331,44 @@ function TabMapping({ mapData, setMapData }) {
       setMapData(newData);
     };
     persistRef.current = persist;
-    map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); persist(); });
+
+    if (mapData && mapData.features && mapData.features.length > 0) {
+      loadGeoJsonIntoGroup(drawnItems, mapData, persist);
+    }
+    lastSyncedMapDataRef.current = JSON.stringify(mapData);
+
+    const drawControl = new L.Control.Draw({
+      position: "topleft",
+      draw: {
+        polygon: { shapeOptions: { color: "#C4341F" } }, // fire perimeter / hazard zones
+        polyline: { shapeOptions: { color: "#3B6FA6" } }, // hose lays, access routes
+        rectangle: { shapeOptions: { color: "#D9A02B" } },
+        circle: { shapeOptions: { color: "#D9A02B" } }, // hazard radius
+        marker: true,
+        circlemarker: false,
+      },
+      edit: { featureGroup: drawnItems },
+    });
+    map.addControl(drawControl);
+
+    // While leaflet-draw's own edit or delete mode is active, drag-
+    // to-move is turned off for every shape — leaving it on at the
+    // same time as leaflet-draw's own vertex-editing handles would
+    // mean a click on the shape body could ambiguously either move
+    // the whole thing or start reshaping it. The sync poll further
+    // below is paused for the same window for the same underlying
+    // reason: don't fight an in-progress edit.
+    map.on(L.Draw.Event.EDITSTART, () => {
+      editingActiveRef.current = true;
+      drawnItems.eachLayer(layer => { if (layer.dragging) layer.dragging.disable(); });
+    });
+    map.on(L.Draw.Event.EDITSTOP, () => {
+      editingActiveRef.current = false;
+      drawnItems.eachLayer(layer => { if (layer.dragging) layer.dragging.enable(); });
+    });
+    map.on(L.Draw.Event.DELETESTART, () => { editingActiveRef.current = true; });
+    map.on(L.Draw.Event.DELETESTOP, () => { editingActiveRef.current = false; });
+    map.on(L.Draw.Event.CREATED, (e) => { drawnItems.addLayer(e.layer); enableLayerDragging(e.layer, persist); persist(); });
     map.on(L.Draw.Event.EDITED, persist);
     map.on(L.Draw.Event.DELETED, persist);
 
@@ -1368,7 +1407,7 @@ function TabMapping({ mapData, setMapData }) {
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
       if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
-        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current);
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, persist);
       }
       lastSyncedMapDataRef.current = incomingJson;
     }, 5000);
@@ -1454,6 +1493,7 @@ function TabMapping({ mapData, setMapData }) {
       if (state.points.length > 1) {
         const finalLine = L.polyline(state.points, { color: "#2E8B72", weight: 3 });
         drawnItemsRef.current.addLayer(finalLine);
+        enableLayerDragging(finalLine, () => persistRef.current());
         persistRef.current();
       }
       freehandStateRef.current = null;
@@ -1467,6 +1507,7 @@ function TabMapping({ mapData, setMapData }) {
     const marker = L.marker(textPrompt.latlng, { icon: makeTextIcon(text) });
     marker.__textLabel = text; // read by persist() above to save it back out
     drawnItemsRef.current.addLayer(marker);
+    enableLayerDragging(marker, () => persistRef.current());
     persistRef.current();
   };
 
@@ -1518,7 +1559,7 @@ function TabMapping({ mapData, setMapData }) {
         </div>
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil — all saved automatically and shared across the board. While either of those two is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
+          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil. Drag any shape or label to reposition it — all saved automatically and shared across the board. While Text Label or Freehand Draw is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
         </div>
         <div style={{ position: "relative" }}>
