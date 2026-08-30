@@ -1976,41 +1976,86 @@ function TabComms({ comms, setComms, incident }) {
    TAB: REHAB TRACKING
    ============================================================ */
 function TabRehab({ rehab, setRehab, resources, now }) {
-  const addEntry = () => setRehab([{ id: uid(), name: "", unit: "", timeIn: nowISO(), bp: "", pulse: "", rr: "", spo2: "", temp: "", status: "In Rehab", timeCleared: "", notes: "" }, ...rehab]);
+  const [openId, setOpenId] = useState(null); // which entry's detail view is open
+
+  const addEntry = () => {
+    const entry = { id: uid(), name: "", unit: "", timeIn: nowISO(), bp: "", pulse: "", rr: "", spo2: "", temp: "", status: "In Rehab", timeCleared: "", notes: "" };
+    setRehab([entry, ...rehab]);
+    setOpenId(entry.id); // open it immediately so the compact card isn't the only way to fill it in
+  };
   const update = (id, patch) => setRehab(rehab.map(r => r.id === id ? { ...r, ...patch } : r));
-  const remove = (id) => setRehab(rehab.filter(r => r.id !== id));
+  const remove = (id) => { setRehab(rehab.filter(r => r.id !== id)); if (openId === id) setOpenId(null); };
   const clear = (id) => update(id, { status: "Cleared", timeCleared: nowISO() });
+
+  const openEntry = rehab.find(r => r.id === openId);
+  const statusColor = (status) => status === "Cleared" ? COLORS.teal : status === "Transported" ? COLORS.red : COLORS.amber;
 
   return (
     <Panel title="Rehab / Medical Monitoring" icon={HeartPulse} right={<Btn kind="subtle" icon={Plus} onClick={addEntry}>Add Entry</Btn>}>
       {rehab.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint }}>No personnel currently logged in rehab.</div>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Compact — just enough to scan a whole list of people at a
+          glance on a narrow screen. Tap a card for everything else
+          (vitals, status, notes) in a single-column detail view,
+          rather than trying to fit every field into this row, which
+          is what made this hard to read on an iPhone before. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {rehab.map(r => (
-          <div key={r.id} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${r.status === "Cleared" ? COLORS.teal : r.status === "Transported" ? COLORS.red : COLORS.amber}`, borderRadius: 5, padding: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr auto", gap: 8, alignItems: "end" }}>
-              <Field label="Name"><TextInput value={r.name} onChange={e => update(r.id, { name: e.target.value })} /></Field>
-              <Field label="Unit"><TextInput value={r.unit} onChange={e => update(r.id, { unit: e.target.value })} /></Field>
-              <Field label="BP"><TextInput value={r.bp} onChange={e => update(r.id, { bp: e.target.value })} placeholder="120/80" /></Field>
-              <Field label="Pulse"><TextInput value={r.pulse} onChange={e => update(r.id, { pulse: e.target.value })} /></Field>
-              <Field label="Resp"><TextInput value={r.rr} onChange={e => update(r.id, { rr: e.target.value })} /></Field>
-              <Field label="SpO2"><TextInput value={r.spo2} onChange={e => update(r.id, { spo2: e.target.value })} /></Field>
-              <Field label="Temp"><TextInput value={r.temp} onChange={e => update(r.id, { temp: e.target.value })} /></Field>
-              <Field label="Status">
-                <Select value={r.status} onChange={e => update(r.id, { status: e.target.value })}>
-                  {["In Rehab", "Cleared", "Transported"].map(s => <option key={s}>{s}</option>)}
-                </Select>
-              </Field>
-              <button onClick={() => remove(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer", height: 36 }}><Trash2 size={14} /></button>
+          <div key={r.id} onClick={() => setOpenId(r.id)}
+            style={{
+              background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${statusColor(r.status)}`,
+              borderRadius: 5, padding: "10px 12px", cursor: "pointer",
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap",
+            }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{r.name || "(unnamed)"}</div>
+              <div style={{ fontSize: 12, color: COLORS.muted }}>{r.unit || "-"}</div>
             </div>
-            <div style={{ display: "flex", gap: 14, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>In: {fmtTime(r.timeIn)} · {elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : now)} elapsed</span>
-              {r.timeCleared && <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>Cleared: {fmtTime(r.timeCleared)}</span>}
-              {r.status === "In Rehab" && <Btn kind="subtle" icon={CheckCircle2} onClick={() => clear(r.id)} style={{ padding: "4px 9px", fontSize: 11.5 }}>Clear</Btn>}
-              <TextInput value={r.notes} onChange={e => update(r.id, { notes: e.target.value })} placeholder="Notes" style={{ flex: 1, minWidth: 160 }} />
+            <div style={{ textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: COLORS.faint, lineHeight: 1.5 }}>
+              <div>In: {fmtTime(r.timeIn)}</div>
+              <div>{elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : now)} elapsed</div>
+              {r.timeCleared && <div>Cleared: {fmtTime(r.timeCleared)}</div>}
             </div>
           </div>
         ))}
       </div>
+
+      {openEntry && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80 }}
+          onClick={() => setOpenId(null)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 360, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Rehab Entry</span>
+              <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <Field label="Name"><TextInput autoFocus value={openEntry.name} onChange={e => update(openEntry.id, { name: e.target.value })} /></Field>
+              <Field label="Unit"><TextInput value={openEntry.unit} onChange={e => update(openEntry.id, { unit: e.target.value })} /></Field>
+              <Field label="BP"><TextInput value={openEntry.bp} onChange={e => update(openEntry.id, { bp: e.target.value })} placeholder="120/80" /></Field>
+              <Field label="Pulse"><TextInput value={openEntry.pulse} onChange={e => update(openEntry.id, { pulse: e.target.value })} /></Field>
+              <Field label="Resp"><TextInput value={openEntry.rr} onChange={e => update(openEntry.id, { rr: e.target.value })} /></Field>
+              <Field label="SpO2"><TextInput value={openEntry.spo2} onChange={e => update(openEntry.id, { spo2: e.target.value })} /></Field>
+              <Field label="Temp"><TextInput value={openEntry.temp} onChange={e => update(openEntry.id, { temp: e.target.value })} /></Field>
+              <Field label="Status">
+                <Select value={openEntry.status} onChange={e => update(openEntry.id, { status: e.target.value })}>
+                  {["In Rehab", "Cleared", "Transported"].map(s => <option key={s}>{s}</option>)}
+                </Select>
+              </Field>
+              <div style={{ fontSize: 12, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>
+                In: {fmtTime(openEntry.timeIn)} · {elapsed(openEntry.timeIn, openEntry.timeCleared ? new Date(openEntry.timeCleared).getTime() : now)} elapsed
+              </div>
+              {openEntry.timeCleared && (
+                <div style={{ fontSize: 12, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>Cleared: {fmtTime(openEntry.timeCleared)}</div>
+              )}
+              {openEntry.status === "In Rehab" && (
+                <Btn kind="subtle" icon={CheckCircle2} onClick={() => clear(openEntry.id)} style={{ justifyContent: "center" }}>Clear</Btn>
+              )}
+              <Field label="Notes"><TextInput value={openEntry.notes} onChange={e => update(openEntry.id, { notes: e.target.value })} placeholder="Notes" /></Field>
+              <Btn kind="danger" icon={Trash2} onClick={() => remove(openEntry.id)} style={{ justifyContent: "center", marginTop: 4 }}>Delete Entry</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </Panel>
   );
 }
