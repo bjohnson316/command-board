@@ -1468,14 +1468,14 @@ function TabMapping({ mapData, setMapData }) {
               onPointerMove={handleOverlayPointerMove}
               onPointerUp={handleOverlayPointerUp}
               onPointerCancel={handleOverlayPointerUp}
-              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000, border: "3px solid #E85D28", boxSizing: "border-box" }}
+              style={{ position: "absolute", inset: 0, cursor: "crosshair", touchAction: "none", zIndex: 1000, border: `2px solid ${COLORS.amber}`, boxSizing: "border-box" }}
             />
           )}
         </div>
       </Panel>
 
       {textPrompt && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }}>
           <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Text Label</span>
