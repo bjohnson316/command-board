@@ -1307,7 +1307,21 @@ function TabMapping({ mapData, setMapData }) {
 
     // Fixes Leaflet's canvas sizing when the map mounts inside a tab
     // that wasn't visible (zero width/height) at the moment of init.
-    setTimeout(() => map.invalidateSize(), 100);
+    // The bounds-fit below has to happen after this, not before —
+    // fitBounds relies on the map's actual known pixel size, which
+    // isn't correct yet until invalidateSize runs.
+    setTimeout(() => {
+      map.invalidateSize();
+      // Jump straight to wherever the existing annotations are,
+      // rather than always opening on the fixed default location —
+      // getBounds() on the FeatureGroup handles markers, circles,
+      // polygons, and lines uniformly. maxZoom keeps a single lone
+      // marker from zooming in unreasonably far, since a single
+      // point has no inherent "bounds" to fit.
+      if (drawnItems.getLayers().length > 0) {
+        map.fitBounds(drawnItems.getBounds(), { padding: [40, 40], maxZoom: 16 });
+      }
+    }, 100);
 
     return () => {
       if (gpsWatchIdRef.current != null) navigator.geolocation.clearWatch(gpsWatchIdRef.current);
@@ -1353,19 +1367,14 @@ function TabMapping({ mapData, setMapData }) {
   // less reliable than just trusting the browser to do what it
   // already does correctly and consistently across devices.
   const handleOverlayClick = (e) => {
-    // Diagnostic logging left in deliberately — three attempts at this
-    // specific bug haven't resolved it, and the last test showed no
-    // console errors at all, which itself is informative: it means
-    // either this handler isn't being reached, or activeTool isn't
-    // "text" at the moment of the click. This will show which.
-    console.log("[Mapping] overlay click received, activeTool =", activeTool);
     if (activeTool !== "text") return;
     try {
-      const latlng = overlayToLatLng(e);
-      console.log("[Mapping] placing text prompt at", latlng);
-      setTextPrompt({ latlng, value: "" });
+      setTextPrompt({ latlng: overlayToLatLng(e), value: "" });
     } catch (err) {
-      console.error("[Mapping] text label placement failed:", err);
+      // Surfaces a concrete error in the console rather than failing
+      // silently, in case something environment-specific ever breaks
+      // the coordinate conversion again.
+      console.error("Text label placement failed:", err);
     }
   };
 
