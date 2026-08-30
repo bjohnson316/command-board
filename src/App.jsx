@@ -367,6 +367,13 @@ function parseMapData(raw) {
 // text directly (styled like a sticky note, not a location pin) —
 // used both when placing a new label and when reconstructing a saved
 // one on load (see the pointToLayer logic in TabMapping).
+// 1 acre, exactly, in square meters — used to convert the geodesic
+// area L.GeometryUtil.geodesicArea() returns (leaflet-draw's own
+// utility, already available since leaflet-draw is imported above)
+// into the unit a US fire department actually reports perimeter size
+// in.
+const SQ_METERS_PER_ACRE = 4046.8564224;
+
 function makeTextIcon(text) {
   const esc = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return L.divIcon({
@@ -1224,6 +1231,20 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
 // the component (it needs access to editingActiveRef/setIsMovingShape)
 // and re-wires drag-to-move on every reconstructed layer, since that
 // capability doesn't survive a save/reload cycle on its own.
+// Recalculated fresh every time a perimeter polygon is saved (see
+// persist() in TabMapping) rather than cached once at creation — a
+// rigid move doesn't change a shape's area, but reshaping it via
+// leaflet-draw's own vertex-edit mode does, and this keeps the
+// displayed figure always accurate rather than stale.
+function perimeterAcres(polygon) {
+  return L.GeometryUtil.geodesicArea(polygon.getLatLngs()[0]) / SQ_METERS_PER_ACRE;
+}
+function bindOrUpdatePerimeterTooltip(layer, acres) {
+  const label = `${acres.toFixed(1)} acres`;
+  if (layer.getTooltip()) layer.setTooltipContent(label);
+  else layer.bindTooltip(label, { permanent: true, direction: "center", className: "cb-perimeter-tooltip" });
+}
+
 function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
@@ -1234,6 +1255,17 @@ function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable) {
     },
   }).eachLayer(layer => {
     featureGroup.addLayer(layer);
+    // Leaflet's own GeoJSON loader attaches the original feature
+    // (including its properties) to layer.feature automatically —
+    // used here to recognize a saved perimeter polygon and restore
+    // both its acreage flag and its on-map label, neither of which
+    // are runtime capabilities that survive a save/reload on their
+    // own.
+    const props = (layer.feature && layer.feature.properties) || {};
+    if (props.isPerimeter) {
+      layer.__isPerimeter = true;
+      bindOrUpdatePerimeterTooltip(layer, perimeterAcres(layer));
+    }
     makeLayerMovable(layer);
   });
 }
@@ -1270,14 +1302,80 @@ function TabMapping({ mapData, setMapData }) {
   const latestMapDataRef = useRef(mapData); // mirrors the mapData prop for use inside the poll's setInterval closure
   const lastSyncedMapDataRef = useRef(null); // JSON string of whatever drawnItems currently reflects
   const textPromptOpenRef = useRef(false); // mirrors textPrompt state, for the same reason as latestMapDataRef
+  const perimeterPointsRef = useRef([]); // accumulated GPS fixes while tracing a perimeter
+  const perimeterTempLineRef = useRef(null); // the live, growing (not yet closed) trace line
+  const perimeterMarkerRef = useRef(null); // live position dot while tracing
+  const perimeterWatchIdRef = useRef(null);
   const [tracking, setTracking] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
   const [textPrompt, setTextPrompt] = useState(null); // { latlng, value } while the text-label dialog is open
   const [isMovingShape, setIsMovingShape] = useState(false); // true while an existing shape/label is being dragged
+  const [tracingPerimeter, setTracingPerimeter] = useState(false);
+  const [perimeterMessage, setPerimeterMessage] = useState("");
 
   useEffect(() => { latestMapDataRef.current = mapData; }, [mapData]);
   useEffect(() => { textPromptOpenRef.current = !!textPrompt; }, [textPrompt]);
+
+  const startTracingPerimeter = () => {
+    if (!navigator.geolocation) { setPerimeterMessage("This device/browser doesn't support GPS location."); return; }
+    perimeterPointsRef.current = [];
+    setPerimeterMessage("");
+    let firstFix = true;
+    perimeterWatchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+        const points = perimeterPointsRef.current;
+        const last = points[points.length - 1];
+        // Skips GPS jitter — only records a new vertex once the
+        // device has actually moved a meaningful distance, so
+        // standing still (or a noisy fix) doesn't add redundant
+        // points that would distort the traced shape.
+        if (!last || last.distanceTo(latlng) >= 3) {
+          points.push(latlng);
+          if (!perimeterTempLineRef.current) {
+            perimeterTempLineRef.current = L.polyline(points, { color: "#C4341F", weight: 3, dashArray: "6 6" }).addTo(mapRef.current);
+          } else {
+            perimeterTempLineRef.current.setLatLngs(points);
+          }
+        }
+        if (!perimeterMarkerRef.current) {
+          perimeterMarkerRef.current = L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: "#C4341F", fillOpacity: 1 }).addTo(mapRef.current);
+        } else {
+          perimeterMarkerRef.current.setLatLng(latlng);
+        }
+        mapRef.current.panTo(latlng); // follow along while walking/driving the perimeter
+        if (firstFix) { mapRef.current.setView(latlng, 17); firstFix = false; }
+      },
+      (err) => setPerimeterMessage(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
+      { enableHighAccuracy: true, maximumAge: 2000 }
+    );
+    setTracingPerimeter(true);
+  };
+
+  const stopTracingPerimeter = () => {
+    if (perimeterWatchIdRef.current != null) navigator.geolocation.clearWatch(perimeterWatchIdRef.current);
+    perimeterWatchIdRef.current = null;
+    if (perimeterTempLineRef.current) { mapRef.current.removeLayer(perimeterTempLineRef.current); perimeterTempLineRef.current = null; }
+    if (perimeterMarkerRef.current) { mapRef.current.removeLayer(perimeterMarkerRef.current); perimeterMarkerRef.current = null; }
+    setTracingPerimeter(false);
+
+    const points = perimeterPointsRef.current;
+    perimeterPointsRef.current = [];
+    if (points.length < 3) {
+      setPerimeterMessage("Not enough GPS points recorded to close a perimeter — try tracing a larger loop.");
+      return;
+    }
+    // L.polygon automatically closes the shape back to its first
+    // point — no need to duplicate it at the end.
+    const polygon = L.polygon(points, { color: "#C4341F", weight: 3, fillOpacity: 0.15 });
+    polygon.__isPerimeter = true; // read by persist() below to recalculate + save acreage
+    bindOrUpdatePerimeterTooltip(polygon, perimeterAcres(polygon));
+    drawnItemsRef.current.addLayer(polygon);
+    makeLayerMovable(polygon);
+    persistRef.current();
+    setPerimeterMessage(`Perimeter traced: ${perimeterAcres(polygon).toFixed(1)} acres`);
+  };
 
   // Wires up whole-shape drag-to-move on a layer. Built on the same
   // technique as the freehand tool below (a transparent overlay using
@@ -1351,6 +1449,19 @@ function TabMapping({ mapData, setMapData }) {
     const persist = () => {
       const features = [];
       drawnItems.eachLayer(layer => {
+        if (layer.__isPerimeter) {
+          // Recalculated fresh every save rather than reusing a value
+          // cached at creation — a rigid move doesn't change area,
+          // but reshaping via leaflet-draw's own vertex-edit mode
+          // does, so this keeps both the stored figure and the
+          // on-map label always accurate.
+          const acres = perimeterAcres(layer);
+          bindOrUpdatePerimeterTooltip(layer, acres);
+          const feature = layer.toGeoJSON();
+          feature.properties = { ...feature.properties, isPerimeter: true, perimeterAcres: acres };
+          features.push(feature);
+          return;
+        }
         const feature = layer.toGeoJSON();
         if (layer instanceof L.Circle) feature.properties = { ...feature.properties, radius: layer.getRadius() };
         if (layer.__textLabel) feature.properties = { ...feature.properties, textLabel: layer.__textLabel };
@@ -1429,7 +1540,7 @@ function TabMapping({ mapData, setMapData }) {
     // themselves there in persist() above, don't trigger a pointless
     // reload of what it just drew itself.
     const syncInterval = setInterval(() => {
-      if (freehandStateRef.current || textPromptOpenRef.current || editingActiveRef.current || movingLayerRef.current) return;
+      if (freehandStateRef.current || textPromptOpenRef.current || editingActiveRef.current || movingLayerRef.current || perimeterWatchIdRef.current != null) return;
       const incomingJson = JSON.stringify(latestMapDataRef.current);
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
@@ -1442,6 +1553,7 @@ function TabMapping({ mapData, setMapData }) {
     return () => {
       clearInterval(syncInterval);
       if (gpsWatchIdRef.current != null) navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+      if (perimeterWatchIdRef.current != null) navigator.geolocation.clearWatch(perimeterWatchIdRef.current);
       map.remove();
       mapRef.current = null;
     };
@@ -1601,11 +1713,15 @@ function TabMapping({ mapData, setMapData }) {
           <Btn kind={tracking ? "solid" : "subtle"} icon={Crosshair} onClick={toggleTracking} style={{ padding: "6px 11px", fontSize: 12.5 }}>
             {tracking ? "Stop Location" : "Show My Location"}
           </Btn>
+          <Btn kind={tracingPerimeter ? "solid" : "subtle"} icon={Crosshair} onClick={tracingPerimeter ? stopTracingPerimeter : startTracingPerimeter} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            {tracingPerimeter ? "Stop Tracing Perimeter" : "Trace GPS Perimeter"}
+          </Btn>
         </div>
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil. Drag any shape or label to reposition it — all saved automatically and shared across the board. While Text Label or Freehand Draw is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
+          Use the shape tools (top-left) to mark the fire perimeter, hazard zones, staging areas, or points of interest, or use <strong>Add Text Label</strong> / <strong>Freehand Draw</strong> above to type a note or sketch with a finger or Apple Pencil. Drag any shape or label to reposition it — all saved automatically and shared across the board. Use <strong>Trace GPS Perimeter</strong> and walk or drive the fire's boundary — stopping the trace closes it into a shape and calculates the enclosed acreage, shown on the map and included in Print/Export. While Text Label or Freehand Draw is armed, the map itself won't pan (tap the button again to release it). Switch between street and satellite view from the layer control (top-right).
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
+          {perimeterMessage && <span style={{ color: COLORS.amber, display: "block", marginTop: 4 }}>{perimeterMessage}</span>}
         </div>
         <div style={{ position: "relative" }}>
           <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
@@ -2951,7 +3067,7 @@ const fmtDateTimeShort = (raw) => {
   return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 };
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage, mapData }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -3036,6 +3152,24 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   const rehabDuration = (r) => r.timeIn ? elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : Date.now()) : "-";
   L.push(...tableLines(["NAME", "UNIT", "TIME IN", "DURATION", "VITALS", "STATUS", "CLEARED", "NOTES"], [160, 40, 50, 55, 190, 65, 50, 102],
     rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), rehabDuration(r), vitalsSegments(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
+
+  // Acreage is computed and stored on the feature itself back when it
+  // was traced/edited on the Mapping tab (see persist() in
+  // TabMapping) — read directly here rather than recomputed, so this
+  // doesn't need any GIS/geometry logic of its own.
+  const perimeters = (mapData && mapData.features || []).filter(f => f.properties && f.properties.isPerimeter);
+  if (perimeters.length > 0) {
+    heading(L, "Fire Perimeter");
+    perimeters.forEach((f, i) => {
+      const label = perimeters.length > 1 ? `Perimeter ${i + 1}: ` : "";
+      push(`${label}${f.properties.perimeterAcres.toFixed(1)} acres`, "H", 9);
+    });
+    if (perimeters.length > 1) {
+      const total = perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
+      push(`Total: ${total.toFixed(1)} acres`, "HB", 9);
+    }
+    blank();
+  }
 
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
@@ -4597,7 +4731,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
               <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
