@@ -3067,7 +3067,7 @@ const fmtDateTimeShort = (raw) => {
   return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 };
 
-function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage, mapData }) {
+function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, attachments, orgChartImage, mapData, mapSnapshotImage }) {
   // Older saved/archived incidents predate these forms (or, in the
   // archive-export path, skip the normal load/normalize step
   // entirely) — fall back to blank defaults rather than throwing on
@@ -3156,18 +3156,25 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   // Acreage is computed and stored on the feature itself back when it
   // was traced/edited on the Mapping tab (see persist() in
   // TabMapping) — read directly here rather than recomputed, so this
-  // doesn't need any GIS/geometry logic of its own.
-  const perimeters = (mapData && mapData.features || []).filter(f => f.properties && f.properties.isPerimeter);
-  if (perimeters.length > 0) {
-    heading(L, "Fire Perimeter");
-    perimeters.forEach((f, i) => {
-      const label = perimeters.length > 1 ? `Perimeter ${i + 1}: ` : "";
-      push(`${label}${f.properties.perimeterAcres.toFixed(1)} acres`, "H", 9);
-    });
-    if (perimeters.length > 1) {
-      const total = perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
-      push(`Total: ${total.toFixed(1)} acres`, "HB", 9);
+  // doesn't need any GIS/geometry logic of its own. The section shows
+  // whenever there's anything at all drawn on the map, not only when
+  // a perimeter has been traced, since the snapshot below is useful
+  // on its own (labels, hazard circles, etc.).
+  const allMapFeatures = (mapData && mapData.features) || [];
+  const perimeters = allMapFeatures.filter(f => f.properties && f.properties.isPerimeter);
+  if (allMapFeatures.length > 0) {
+    heading(L, "Incident Perimeter");
+    if (perimeters.length > 0) {
+      perimeters.forEach((f, i) => {
+        const label = perimeters.length > 1 ? `Perimeter ${i + 1}: ` : "";
+        push(`${label}${f.properties.perimeterAcres.toFixed(1)} acres`, "H", 9);
+      });
+      if (perimeters.length > 1) {
+        const total = perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
+        push(`Total: ${total.toFixed(1)} acres`, "HB", 9);
+      }
     }
+    if (mapSnapshotImage) L.push({ kind: "image", img: mapSnapshotImage });
     blank();
   }
 
@@ -3718,6 +3725,175 @@ function renderOrgChartDataUri(org) {
   return canvas.toDataURL("image/png");
 }
 
+/* ============================================================
+   MAP ANNOTATIONS -> PDF: renders every drawn shape (text labels,
+   freehand lines, hazard circles, and traced perimeters) onto a
+   plain white diagram, the same way the org chart is rendered — this
+   is a deliberate simplification, not the live interactive map with
+   its street/satellite tiles: those tiles come from an external
+   server without the CORS headers a canvas needs to export an image
+   that includes them, so embedding the literal map view isn't
+   possible here. A vector re-drawing of just the annotations avoids
+   that entirely and is honestly more legible on paper anyway.
+   ============================================================ */
+
+// Walks every feature's geometry (Point/LineString/Polygon, whatever
+// nesting depth that implies) to find the overall lat/lng bounds,
+// then separately widens that box for any circle (stored as a Point
+// plus a radius in meters) so its edge doesn't get clipped when its
+// center sits near the box computed from raw coordinates alone.
+function computeGeoJsonBounds(mapData) {
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  const visit = (coords, depth) => {
+    if (depth === 0) {
+      const [lng, lat] = coords;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    } else {
+      coords.forEach(c => visit(c, depth - 1));
+    }
+  };
+  mapData.features.forEach(f => {
+    const g = f.geometry;
+    if (g.type === "Point") visit(g.coordinates, 0);
+    else if (g.type === "LineString") visit(g.coordinates, 1);
+    else if (g.type === "Polygon") visit(g.coordinates, 2);
+  });
+  mapData.features.forEach(f => {
+    if (f.geometry.type === "Point" && f.properties && "radius" in f.properties) {
+      const [lng, lat] = f.geometry.coordinates;
+      const dLat = f.properties.radius / 111320;
+      const dLng = f.properties.radius / (111320 * Math.cos(lat * Math.PI / 180));
+      minLat = Math.min(minLat, lat - dLat); maxLat = Math.max(maxLat, lat + dLat);
+      minLng = Math.min(minLng, lng - dLng); maxLng = Math.max(maxLng, lng + dLng);
+    }
+  });
+  return { minLat, maxLat, minLng, maxLng };
+}
+
+function renderMapSnapshotDataUri(mapData) {
+  if (!mapData || !mapData.features || mapData.features.length === 0) return null;
+  const bounds = computeGeoJsonBounds(mapData);
+  const PADDING = 40, CANVAS_W = 1000, CANVAS_H = 700;
+  const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+  // Longitude degrees represent fewer real-world meters than latitude
+  // degrees do at any latitude away from the equator — this factor
+  // keeps the drawing's proportions true rather than stretched.
+  const lngScale = Math.cos(centerLat * Math.PI / 180);
+  // Floored so a single point (or a tiny cluster) doesn't blow up
+  // into an absurd zoom level with a division near zero.
+  const spanLat = Math.max(bounds.maxLat - bounds.minLat, 0.0005);
+  const spanLng = Math.max((bounds.maxLng - bounds.minLng) * lngScale, 0.0005);
+  const availW = CANVAS_W - PADDING * 2, availH = CANVAS_H - PADDING * 2;
+  const scale = Math.min(availW / spanLng, availH / spanLat); // one uniform scale for both axes — no distortion
+  const project = (lat, lng) => ({
+    x: PADDING + ((lng - bounds.minLng) * lngScale * scale) + (availW - spanLng * scale) / 2,
+    y: PADDING + ((bounds.maxLat - lat) * scale) + (availH - spanLat * scale) / 2, // north = up
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  mapData.features.forEach(f => {
+    const props = f.properties || {};
+    const g = f.geometry;
+    if (g.type === "LineString") {
+      const pts = g.coordinates.map(([lng, lat]) => project(lat, lng));
+      ctx.strokeStyle = "#2E8B72";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    } else if (g.type === "Polygon") {
+      const ring = g.coordinates[0].map(([lng, lat]) => project(lat, lng));
+      const isPerimeter = !!props.isPerimeter;
+      ctx.beginPath();
+      ring.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.fillStyle = isPerimeter ? "rgba(196,52,31,0.15)" : "rgba(217,160,43,0.15)";
+      ctx.fill();
+      ctx.strokeStyle = isPerimeter ? "#C4341F" : "#D9A02B";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      if (isPerimeter && "perimeterAcres" in props) {
+        const cx = ring.reduce((s, p) => s + p.x, 0) / ring.length;
+        const cy = ring.reduce((s, p) => s + p.y, 0) / ring.length;
+        ctx.fillStyle = "#C4341F";
+        ctx.font = "bold 14px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(`${props.perimeterAcres.toFixed(1)} acres`, cx, cy);
+      }
+    } else if (g.type === "Point") {
+      const p = project(g.coordinates[1], g.coordinates[0]);
+      if ("radius" in props) {
+        const rPixels = (props.radius / 111320) * scale;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rPixels, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(217,160,43,0.15)";
+        ctx.fill();
+        ctx.strokeStyle = "#D9A02B";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else if ("textLabel" in props) {
+        ctx.font = "600 13px Arial, sans-serif";
+        const textW = ctx.measureText(props.textLabel).width;
+        const boxW = textW + 14, boxH = 22, bx = p.x - boxW / 2, by = p.y - boxH / 2, r = 4;
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#96690F";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by);
+        ctx.arcTo(bx + boxW, by, bx + boxW, by + boxH, r);
+        ctx.arcTo(bx + boxW, by + boxH, bx, by + boxH, r);
+        ctx.arcTo(bx, by + boxH, bx, by, r);
+        ctx.arcTo(bx, by, bx + boxW, by, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#191C1F";
+        ctx.textAlign = "center";
+        ctx.fillText(props.textLabel, p.x, p.y + 4);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#3B6FA6";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  });
+
+  // A basic north arrow for orientation, since there's no base map
+  // underneath to otherwise convey it.
+  ctx.strokeStyle = "#5B6570";
+  ctx.fillStyle = "#5B6570";
+  ctx.lineWidth = 2;
+  const arrowX = CANVAS_W - 40, arrowYBottom = 55, arrowYTop = 20;
+  ctx.beginPath();
+  ctx.moveTo(arrowX, arrowYBottom);
+  ctx.lineTo(arrowX, arrowYTop);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(arrowX, arrowYTop);
+  ctx.lineTo(arrowX - 5, arrowYTop + 9);
+  ctx.lineTo(arrowX + 5, arrowYTop + 9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = "bold 12px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("N", arrowX, arrowYBottom + 16);
+
+  return canvas.toDataURL("image/png");
+}
+
 function loadLogoRGB(dataUri, maxDim = 130) {
   return new Promise((resolve) => {
     try {
@@ -3762,11 +3938,17 @@ async function downloadPacketPdf(data) {
   // gated by a checkbox, matching the text org summary next to it.
   const orgChartDataUri = renderOrgChartDataUri(normalizeOrg(data.org));
   const orgChartImage = orgChartDataUri ? await loadLogoRGB(orgChartDataUri, 1400) : null;
+  // Same inline-image approach as the org chart above, placed instead
+  // under "Incident Perimeter" — see the comment on
+  // renderMapSnapshotDataUri for why this redraws just the
+  // annotations rather than exporting the live map with its tiles.
+  const mapSnapshotDataUri = renderMapSnapshotDataUri(parseMapData(data.mapData));
+  const mapSnapshotImage = mapSnapshotDataUri ? await loadLogoRGB(mapSnapshotDataUri, 1400) : null;
   for (const a of imageAttachments) {
     const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
     if (decoded) attachmentImages.push({ ...decoded, caption: a.name });
   }
-  const parts = buildSimplePdf(buildPacketLines({ ...data, orgChartImage }), logo, { name: inc.name, started }, attachmentImages);
+  const parts = buildSimplePdf(buildPacketLines({ ...data, orgChartImage, mapSnapshotImage, mapData: parseMapData(data.mapData) }), logo, { name: inc.name, started }, attachmentImages);
   const blob = new Blob(parts, { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
