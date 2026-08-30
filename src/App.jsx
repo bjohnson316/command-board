@@ -3175,31 +3175,6 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   L.push(...tableLines(["NAME", "UNIT", "TIME IN", "DURATION", "VITALS", "STATUS", "CLEARED", "NOTES"], [160, 40, 50, 55, 190, 65, 50, 102],
     rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), rehabDuration(r), vitalsSegments(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
 
-  // Acreage is computed and stored on the feature itself back when it
-  // was traced/edited on the Mapping tab (see persist() in
-  // TabMapping) — read directly here rather than recomputed, so this
-  // doesn't need any GIS/geometry logic of its own. The section shows
-  // whenever there's anything at all drawn on the map, not only when
-  // a perimeter has been traced, since the snapshot below is useful
-  // on its own (labels, hazard circles, etc.).
-  const allMapFeatures = (mapData && mapData.features) || [];
-  const perimeters = allMapFeatures.filter(f => f.properties && f.properties.isPerimeter);
-  if (allMapFeatures.length > 0) {
-    heading(L, "Incident Perimeter");
-    if (perimeters.length > 0) {
-      perimeters.forEach((f, i) => {
-        const label = perimeters.length > 1 ? `Perimeter ${i + 1}: ` : "";
-        push(`${label}${f.properties.perimeterAcres.toFixed(1)} acres`, "H", 9);
-      });
-      if (perimeters.length > 1) {
-        const total = perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
-        push(`Total: ${total.toFixed(1)} acres`, "HB", 9);
-      }
-    }
-    if (mapSnapshotImage) L.push({ kind: "image", img: mapSnapshotImage });
-    blank();
-  }
-
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
   if (orgLines.length === 0) push("(none entered)");
@@ -3324,6 +3299,35 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     L.push(...tableLines(["FILE NAME", "TYPE", "SIZE"], [400, 200, 112],
       nonImageAttachments.map(a => [a.name, a.type || "unknown", `${((a.size || 0) / 1024).toFixed(0)} KB`])));
   }
+
+  // Placed last, on its own forced page, right before the trailing
+  // attachment photo pages buildSimplePdf appends after everything
+  // here — rather than flowing inline with whatever text happens to
+  // precede it. Acreage is computed and stored on the feature itself
+  // back when it was traced/edited on the Mapping tab (see persist()
+  // in TabMapping) — read directly here rather than recomputed, so
+  // this doesn't need any GIS/geometry logic of its own. The section
+  // shows whenever there's anything at all drawn on the map, not only
+  // when a perimeter has been traced, since the snapshot is useful on
+  // its own (labels, hazard circles, etc.).
+  const allMapFeatures = (mapData && mapData.features) || [];
+  const perimeters = allMapFeatures.filter(f => f.properties && f.properties.isPerimeter);
+  if (allMapFeatures.length > 0) {
+    L.push({ kind: "pagebreak" });
+    heading(L, "Incident Perimeter");
+    if (perimeters.length > 0) {
+      perimeters.forEach((f, i) => {
+        const label = perimeters.length > 1 ? `Perimeter ${i + 1}: ` : "";
+        push(`${label}${f.properties.perimeterAcres.toFixed(1)} acres`, "H", 9);
+      });
+      if (perimeters.length > 1) {
+        const total = perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
+        push(`Total: ${total.toFixed(1)} acres`, "HB", 9);
+      }
+    }
+    if (mapSnapshotImage) L.push({ kind: "image", img: mapSnapshotImage });
+  }
+
   return L;
 }
 
@@ -3363,6 +3367,15 @@ function buildSimplePdf(lines, logo, meta, attachmentImages = []) {
   const IMAGE_MAX_H = 300; // cap so one image can't eat an entire page (landscape pages are shorter, so this is smaller than it'd be in portrait)
   const IMAGE_GAP = 16;
   for (const ln of lines) {
+    if (ln.kind === "pagebreak") {
+      // Forces a fresh page unconditionally — used to put a section
+      // on its own page regardless of how much room is left on the
+      // current one. A no-op if the current page is already empty
+      // (e.g. a previous overflow just started one), so this never
+      // inserts a genuinely blank page.
+      if (cur.length > 0) { pages.push(cur); cur = []; y = MARGIN_TOP; }
+      continue;
+    }
     if (ln.kind === "image") {
       // Scale to fit the content width (never upscale past the
       // image's native size), then cap the height too. Images never
@@ -3937,17 +3950,19 @@ function loadTileImage(url) {
   });
 }
 
-// Attempts to embed the real OpenStreetMap street tiles behind the
-// drawn annotations, using Leaflet's own Web Mercator projection
-// math (L.CRS.EPSG3857) rather than reimplementing slippy-map tile
-// math independently, since that's well-established and already
-// correct. This can fail for reasons entirely outside this app's
-// control — OSM's tile servers don't reliably send the CORS header a
-// canvas needs to export an image that includes them (this has
-// reportedly changed over time and isn't something to depend on) —
-// so every failure path here returns null rather than throwing,
-// and the caller (renderMapSnapshotDataUri) falls back to the
-// tile-free diagram instead of producing nothing.
+// Attempts to embed the real Esri World Imagery satellite tiles
+// behind the drawn annotations, using Leaflet's own Web Mercator
+// projection math (L.CRS.EPSG3857) rather than reimplementing
+// slippy-map tile math independently, since that's well-established
+// and already correct. Esri's own developer documentation lists
+// server.arcgisonline.com as one of the servers automatically
+// recognized as CORS-enabled by their API, which is considerably more
+// reliable evidence than OpenStreetMap's tile servers offered (their
+// CORS support has reportedly been inconsistent over time) — this is
+// why satellite was chosen over street tiles here. Every failure path
+// below still returns null rather than throwing, though, and the
+// caller (renderMapSnapshotDataUri) falls back to the tile-free
+// diagram instead of producing nothing, in case that ever changes.
 async function renderMapSnapshotWithTiles(mapData, bounds) {
   const TILE_SIZE = 256, CANVAS_W = 1000, CANVAS_H = 700, PADDING = 20;
 
@@ -3971,7 +3986,10 @@ async function renderMapSnapshotWithTiles(mapData, bounds) {
   const tileRequests = [];
   for (let tx = firstTileX; tx <= lastTileX; tx++) {
     for (let ty = firstTileY; ty <= lastTileY; ty++) {
-      const url = `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
+      // Esri's tile URL scheme orders {z}/{y}/{x} — the reverse of
+      // OpenStreetMap's {z}/{x}/{y} — matching the same satellite
+      // layer already used on the live map.
+      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${tx}`;
       tileRequests.push(
         loadTileImage(url)
           .then(img => ({ img, px: tx * TILE_SIZE - originX, py: ty * TILE_SIZE - originY }))
