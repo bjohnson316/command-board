@@ -1966,7 +1966,7 @@ function TabWeather() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const gpsMarkerRef = useRef(null);
-  const radarLayerRef = useRef(null);
+  const radarLayersRef = useRef({}); // frame index -> L.TileLayer, kept loaded even when not the active frame
   const [radarFrames, setRadarFrames] = useState([]); // [{ time, path }, ...] past + nowcast
   const [radarHost, setRadarHost] = useState("");
   const [radarIndex, setRadarIndex] = useState(0);
@@ -2035,19 +2035,44 @@ function TabWeather() {
     }).addTo(map);
     gpsMarkerRef.current = L.marker([coords.lat, coords.lng]).addTo(map).bindPopup("Your location");
     setTimeout(() => map.invalidateSize(), 100);
-    return () => { map.remove(); mapRef.current = null; };
+    return () => { map.remove(); mapRef.current = null; radarLayersRef.current = {}; };
   }, [coords]);
 
-  // Swaps in the radar tile overlay whenever the available frames or
-  // the currently-displayed frame changes.
+  // Pre-creates a tile layer for every available frame, all added to
+  // the map simultaneously (so all their tiles start loading right
+  // away) but invisible except the active one. Frame switching then
+  // becomes a pure opacity toggle rather than destroying and
+  // recreating a layer from scratch on every tick — which is what
+  // was actually causing the choppy animation and missing tiles on
+  // PC: a larger browser window needs far more tiles to cover the
+  // visible map than a phone screen does, and recreating the whole
+  // layer every 600ms meant some of those extra requests simply
+  // hadn't finished loading before the next frame swapped them out.
   useEffect(() => {
     if (!mapRef.current || !radarFrames.length || !radarHost) return;
-    const frame = radarFrames[radarIndex];
-    if (!frame) return;
-    const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
-    if (radarLayerRef.current) mapRef.current.removeLayer(radarLayerRef.current);
-    radarLayerRef.current = L.tileLayer(url, { opacity: 0.75, maxZoom: 12, zIndex: 500 }).addTo(mapRef.current);
-  }, [radarFrames, radarHost, radarIndex]);
+    radarFrames.forEach((frame, i) => {
+      if (!radarLayersRef.current[i]) {
+        const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
+        radarLayersRef.current[i] = L.tileLayer(url, { opacity: 0, maxZoom: 12, zIndex: 500 }).addTo(mapRef.current);
+      }
+    });
+    // Drops any cached layers left over from a previous, differently-sized
+    // frame list (e.g. after a periodic refresh) so they don't linger.
+    Object.keys(radarLayersRef.current).forEach(key => {
+      if (Number(key) >= radarFrames.length) {
+        mapRef.current.removeLayer(radarLayersRef.current[key]);
+        delete radarLayersRef.current[key];
+      }
+    });
+  }, [radarFrames, radarHost]);
+
+  // Instant — every frame's tiles are already loaded by the effect
+  // above, so this never triggers a network request.
+  useEffect(() => {
+    Object.entries(radarLayersRef.current).forEach(([i, layer]) => {
+      layer.setOpacity(Number(i) === radarIndex ? 0.75 : 0);
+    });
+  }, [radarIndex]);
 
   // Loops through the available frames for an animated "live" radar
   // view rather than just a single static snapshot.
