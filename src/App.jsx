@@ -5286,6 +5286,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [tab, setTab] = useState("201");
   const [showLib, setShowLib] = useState(false);
   const [showChangePin, setShowChangePin] = useState(false);
+  const [showChangePinAuth, setShowChangePinAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
   const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [] });
@@ -5733,7 +5734,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
-              <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePin(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
+              <Btn kind="ghost" icon={KeyRound} onClick={() => setShowChangePinAuth(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Change PIN</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
@@ -5814,6 +5815,14 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onArchive={archiveIncident} onOpenArchive={() => setShowArchive(true)} mandatory={!incidentLoaded} />
       )}
 
+      {showChangePinAuth && (
+        <PasswordConfirmModal
+          title="Admin Password Required"
+          message="Enter the admin password to change the board's main PIN."
+          onConfirm={() => { setShowChangePinAuth(false); setShowChangePin(true); }}
+          onCancel={() => setShowChangePinAuth(false)}
+        />
+      )}
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
 
       {showArchive && (
