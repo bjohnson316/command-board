@@ -1967,11 +1967,14 @@ function TabWeather() {
   const mapRef = useRef(null);
   const gpsMarkerRef = useRef(null);
   const radarLayersRef = useRef({}); // frame index -> L.TileLayer, kept loaded even when not the active frame
+  const radarIndexRef = useRef(0); // mirrors radarIndex for use inside the async sequential-load callback below
   const [radarFrames, setRadarFrames] = useState([]); // [{ time, path }, ...] past + nowcast
   const [radarHost, setRadarHost] = useState("");
   const [radarIndex, setRadarIndex] = useState(0);
+  useEffect(() => { radarIndexRef.current = radarIndex; }, [radarIndex]);
   const [radarPlaying, setRadarPlaying] = useState(false);
   const [radarError, setRadarError] = useState("");
+  const [radarDebug, setRadarDebug] = useState(""); // on-screen diagnostic, since mobile Safari's console isn't easily reachable
   const radarTimerRef = useRef(null);
 
   const fetchCurrentConditions = (lat, lng) => {
@@ -1992,16 +1995,27 @@ function TabWeather() {
     // publicly-shared radar mosaic tiles compatible with Leaflet the
     // same way the street/satellite base layers already are.
     fetch("https://api.rainviewer.com/public/weather-maps.json")
-      .then(res => { if (!res.ok) throw new Error("bad response"); return res.json(); })
+      .then(res => { if (!res.ok) throw new Error("bad response: " + res.status); return res.json(); })
       .then(data => {
-        const past = data.radar.past || [];
-        const nowcast = data.radar.nowcast || [];
+        console.log("[Weather] RainViewer metadata fetched OK. host:", data.host, "past frames:", (data.radar.past || []).length, "nowcast frames:", (data.radar.nowcast || []).length);
+        setRadarDebug(`Metadata OK: ${(data.radar.past || []).length} past + ${(data.radar.nowcast || []).length} nowcast frames from ${data.host}`);
+        // Trimmed to the most recent frames rather than every one
+        // RainViewer provides (which can be 13+ past frames alone) —
+        // fewer total frames means fewer tile layers ever need
+        // loading at all, which matters most on mobile Safari's
+        // tighter concurrent-request and memory limits.
+        const past = (data.radar.past || []).slice(-6);
+        const nowcast = (data.radar.nowcast || []).slice(0, 2);
         const frames = [...past, ...nowcast];
         setRadarFrames(frames);
         setRadarHost(data.host);
         setRadarIndex(Math.max(0, past.length - 1)); // start on the most recent actual (non-forecast) frame
       })
-      .catch(() => setRadarError("Couldn't load radar data. Check your connection and try Refresh."));
+      .catch((err) => {
+        console.error("[Weather] RainViewer metadata fetch failed:", err);
+        setRadarError("Couldn't load radar data. Check your connection and try Refresh.");
+        setRadarDebug(`Metadata fetch FAILED: ${err.message}`);
+      });
   };
 
   useEffect(() => {
@@ -2038,24 +2052,74 @@ function TabWeather() {
     return () => { map.remove(); mapRef.current = null; radarLayersRef.current = {}; };
   }, [coords]);
 
-  // Pre-creates a tile layer for every available frame, all added to
-  // the map simultaneously (so all their tiles start loading right
-  // away) but invisible except the active one. Frame switching then
-  // becomes a pure opacity toggle rather than destroying and
-  // recreating a layer from scratch on every tick — which is what
-  // was actually causing the choppy animation and missing tiles on
-  // PC: a larger browser window needs far more tiles to cover the
-  // visible map than a phone screen does, and recreating the whole
-  // layer every 600ms meant some of those extra requests simply
-  // hadn't finished loading before the next frame swapped them out.
+  // Pre-creates a tile layer for every available frame so frame
+  // switching can later become a pure opacity toggle rather than
+  // destroying and recreating a layer from scratch on every tick —
+  // that recreate-every-tick approach was what originally caused the
+  // choppy animation and missing tiles on PC (a larger browser window
+  // needs far more tiles to cover the visible map than a phone screen
+  // does, and some of those requests simply hadn't finished before
+  // the next frame swapped them out).
+  //
+  // Loaded ONE FRAME AT A TIME (waiting for each layer's "load" event
+  // before starting the next) rather than adding every layer
+  // simultaneously — an earlier version of this fix did load them all
+  // at once, which fixed PC but broke iOS entirely: mobile Safari has
+  // much tighter limits on simultaneous connections and image memory
+  // than a desktop browser, and a burst of 8+ full tile layers all
+  // requesting at the same instant silently exceeded that ceiling.
+  // Sequential loading keeps the peak concurrent request count to
+  // whatever one frame needs, matching what already worked reliably
+  // before, while still arriving at every frame being cached for
+  // smooth animation once loading finishes.
   useEffect(() => {
     if (!mapRef.current || !radarFrames.length || !radarHost) return;
-    radarFrames.forEach((frame, i) => {
-      if (!radarLayersRef.current[i]) {
-        const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
-        radarLayersRef.current[i] = L.tileLayer(url, { opacity: 0, maxZoom: 12, zIndex: 500 }).addTo(mapRef.current);
-      }
-    });
+    let cancelled = false;
+
+    // The initially-active frame is the most recent PAST frame, which
+    // usually sits near the end of the array, not at index 0 — this
+    // ordering loads that frame first so something appears on screen
+    // immediately, then backfills the rest afterward for animation.
+    // Guards against a real timing risk: if radar metadata finishes
+    // fetching before the map has resolved its true on-screen size
+    // (the fix for that runs on a short delay after map creation),
+    // Leaflet would compute entirely wrong tile coordinates for
+    // whatever size it mistakenly still thinks it is.
+    mapRef.current.invalidateSize();
+
+    const activeIndex = radarIndexRef.current;
+    const order = [activeIndex, ...radarFrames.map((_, i) => i).filter(i => i !== activeIndex)];
+
+    const loadNext = (pos) => {
+      if (cancelled || pos >= order.length) return;
+      const index = order[pos];
+      if (radarLayersRef.current[index]) { loadNext(pos + 1); return; } // already cached from a previous run
+      const frame = radarFrames[index];
+      const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
+      console.log(`[Weather] Creating radar layer for frame ${index}, template: ${url}`);
+      // Opacity set correctly right at creation, not left to the
+      // separate toggle effect below — that effect only re-runs when
+      // radarIndex itself changes, which won't happen again once it's
+      // already set to this same value, so a layer created afterward
+      // for the already-active frame would otherwise never become
+      // visible until the user actually switched frames.
+      const layer = L.tileLayer(url, { opacity: index === radarIndexRef.current ? 0.75 : 0, maxZoom: 12, zIndex: 500 });
+      let tileErrorCount = 0;
+      layer.on("tileerror", (e) => {
+        tileErrorCount++;
+        console.error(`[Weather] Tile error on frame ${index} (${tileErrorCount} so far):`, e.tile && e.tile.src, e.error);
+        setRadarDebug(d => (`${d} | frame ${index}: ${tileErrorCount} tile error(s)`).slice(-500));
+      });
+      layer.once("load", () => {
+        console.log(`[Weather] Frame ${index} finished loading (${tileErrorCount} tile errors).`);
+        setRadarDebug(d => (`${d} | frame ${index} loaded (${tileErrorCount} errors)`).slice(-500));
+        if (!cancelled) loadNext(pos + 1);
+      });
+      layer.addTo(mapRef.current);
+      radarLayersRef.current[index] = layer;
+    };
+    loadNext(0);
+
     // Drops any cached layers left over from a previous, differently-sized
     // frame list (e.g. after a periodic refresh) so they don't linger.
     Object.keys(radarLayersRef.current).forEach(key => {
@@ -2064,6 +2128,8 @@ function TabWeather() {
         delete radarLayersRef.current[key];
       }
     });
+
+    return () => { cancelled = true; };
   }, [radarFrames, radarHost]);
 
   // Instant — every frame's tiles are already loaded by the effect
@@ -2169,6 +2235,11 @@ function TabWeather() {
         {activeFrame && (
           <div style={{ fontSize: 11.5, color: COLORS.faint, marginTop: 6, fontFamily: "'IBM Plex Mono', monospace" }}>
             Frame: {new Date(activeFrame.time * 1000).toLocaleTimeString()}
+          </div>
+        )}
+        {radarDebug && (
+          <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 4, fontFamily: "'IBM Plex Mono', monospace", wordBreak: "break-word" }}>
+            Debug: {radarDebug}
           </div>
         )}
       </Panel>
