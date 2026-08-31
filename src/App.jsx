@@ -2901,7 +2901,7 @@ function Tab209({ ics209, setIcs209, incident, mapData }) {
           <Field label="Date/Time Prepared"><TextInput type="datetime-local" value={ics209.preparedDateTime} onChange={e => set({ preparedDateTime: e.target.value })} /></Field>
           <Field label="Date/Time Submitted"><TextInput type="datetime-local" value={ics209.submittedDateTime} onChange={e => set({ submittedDateTime: e.target.value })} /></Field>
           <Field label="Time Zone"><TextInput value={ics209.submittedTimeZone} onChange={e => set({ submittedTimeZone: e.target.value })} /></Field>
-          <Field label="Primary Location/Org/Agency Sent To"><TextInput value={ics209.sentTo} onChange={e => set({ sentTo: e.target.value })} /></Field>
+          <Field label="Primary Location/Org/Agency"><TextInput value={ics209.sentTo} onChange={e => set({ sentTo: e.target.value })} /></Field>
           <Field label="Approved By — Print Name"><TextInput value={ics209.approvedByName} onChange={e => set({ approvedByName: e.target.value })} /></Field>
           <Field label="ICS Position"><TextInput value={ics209.approvedByPosition} onChange={e => set({ approvedByPosition: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={ics209.approvedBySignature} onChange={e => set({ approvedBySignature: e.target.value })} placeholder="Type name to sign" /></Field>
