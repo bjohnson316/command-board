@@ -366,6 +366,17 @@ function parseMapData(raw) {
   return raw;
 }
 
+// Shared by the ICS-209's "Current Size/Area Involved" field and the
+// PDF export's "Incident Perimeter" section, so both read the exact
+// same figure rather than two separate implementations that could
+// drift apart.
+function getTotalPerimeterAcres(mapData) {
+  const features = (mapData && mapData.features) || [];
+  const perimeters = features.filter(f => f.properties && f.properties.isPerimeter);
+  if (perimeters.length === 0) return null;
+  return perimeters.reduce((sum, f) => sum + f.properties.perimeterAcres, 0);
+}
+
 // A text label on the map is a marker with a DivIcon rendering the
 // text directly (styled like a sticky note, not a location pin) —
 // used both when placing a new label and when reconstructing a saved
@@ -2572,7 +2583,29 @@ function Tab208({ ics208, setIcs208, incident }) {
 /* ============================================================
    TAB: ICS-208 HM · SITE SAFETY PLAN (HAZMAT)
    ============================================================ */
-function Tab208HM({ ics208hm, setIcs208hm, incident }) {
+// Shared by ICS-208 HM and ICS-209 — a consistent, read-only strip of
+// whatever's already been entered on the Tactical Worksheet and
+// Mapping tab, so it doesn't need retyping on either form. Acreage
+// comes from getTotalPerimeterAcres, the same figure the PDF export's
+// "Incident Perimeter" section uses.
+function IncidentSummaryStrip({ incident, mapData }) {
+  const totalAcres = getTotalPerimeterAcres(mapData);
+  const started = [incident.dateInitiated, incident.timeInitiated].filter(Boolean).join(" ");
+  const roStyle = { opacity: 0.65 };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${COLORS.line}` }}>
+      <Field label="Incident Name"><TextInput value={incident.name} disabled style={roStyle} /></Field>
+      <Field label="Incident Number"><TextInput value={incident.number} disabled style={roStyle} /></Field>
+      <Field label="Incident Type"><TextInput value={incident.type} disabled style={roStyle} /></Field>
+      <Field label="Location"><TextInput value={incident.location} disabled style={roStyle} /></Field>
+      <Field label="Incident Commander"><TextInput value={incident.icName} disabled style={roStyle} /></Field>
+      <Field label="Started"><TextInput value={started || "—"} disabled style={roStyle} /></Field>
+      <Field label="Area Involved"><TextInput value={totalAcres != null ? `${totalAcres.toFixed(1)} acres` : "—"} disabled style={roStyle} /></Field>
+    </div>
+  );
+}
+
+function Tab208HM({ ics208hm, setIcs208hm, incident, mapData }) {
   const set = (patch) => setIcs208hm({ ...ics208hm, ...patch });
   const cell = { padding: "6px 6px", fontSize: 12.5 };
   const checkRow = { display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 };
@@ -2592,13 +2625,11 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-208 HM · Site Safety and Control Plan" icon={AlertTriangle}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-          <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
+        <IncidentSummaryStrip incident={incident} mapData={mapData} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="Date Prepared"><TextInput type="datetime-local" value={ics208hm.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8 }}>
-            <Field label="Op. Period From"><TextInput type="datetime-local" value={ics208hm.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
-            <Field label="Op. Period To"><TextInput type="datetime-local" value={ics208hm.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
-          </div>
+          <Field label="Op. Period From"><TextInput type="datetime-local" value={ics208hm.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
+          <Field label="Op. Period To"><TextInput type="datetime-local" value={ics208hm.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
         </div>
         <div style={{ marginTop: 12 }}>
           <Field label="Section I — Incident Location" wide><TextInput value={ics208hm.incidentLocation} onChange={e => set({ incidentLocation: e.target.value })} /></Field>
@@ -2606,7 +2637,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section II · Organization" icon={Users}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="Incident Commander"><TextInput value={ics208hm.orgIC} onChange={e => set({ orgIC: e.target.value })} /></Field>
           <Field label="HM Group Supervisor"><TextInput value={ics208hm.orgHMGroupSupervisor} onChange={e => set({ orgHMGroupSupervisor: e.target.value })} /></Field>
           <Field label="Tech. Specialist – HM Reference"><TextInput value={ics208hm.orgTechSpecialist} onChange={e => set({ orgTechSpecialist: e.target.value })} /></Field>
@@ -2622,7 +2653,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Entry Team (Buddy System)</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
           {ics208hm.entryTeam.map(m => (
             <div key={m.id}>
               <Field label={m.label}><TextInput value={m.name} onChange={e => updateTeam("entryTeam", m.id, { name: e.target.value })} placeholder="Name" /></Field>
@@ -2632,7 +2663,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Decontamination Element</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
           {ics208hm.deconTeam.map(m => (
             <div key={m.id}>
               <Field label={m.label}><TextInput value={m.name} onChange={e => updateTeam("deconTeam", m.id, { name: e.target.value })} placeholder="Name" /></Field>
@@ -2646,9 +2677,25 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10 }}>
-              <th style={cell}>Material</th><th style={cell}>Container</th><th style={cell}>Qty</th><th style={cell}>Phys. State</th>
-              <th style={cell}>pH</th><th style={cell}>IDLH</th><th style={cell}>F.P.</th><th style={cell}>I.T.</th>
-              <th style={cell}>V.P.</th><th style={cell}>V.D.</th><th style={cell}>S.G.</th><th style={cell}>LEL</th><th style={cell}>UEL</th><th style={cell}></th>
+              {/* Each header's width matches its column's input width
+                  exactly, with nowrap so header text can't wrap and
+                  force the column wider than its data cells — that
+                  mismatch was the main source of columns not lining
+                  up with the fields below them. */}
+              <th style={{ ...cell, width: 110, whiteSpace: "nowrap" }}>Material</th>
+              <th style={{ ...cell, width: 90, whiteSpace: "nowrap" }}>Container</th>
+              <th style={{ ...cell, width: 60, whiteSpace: "nowrap" }}>Qty</th>
+              <th style={{ ...cell, width: 70, whiteSpace: "nowrap" }}>Phys. State</th>
+              <th style={{ ...cell, width: 45, whiteSpace: "nowrap" }}>pH</th>
+              <th style={{ ...cell, width: 60, whiteSpace: "nowrap" }}>IDLH</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>F.P.</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>I.T.</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>V.P.</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>V.D.</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>S.G.</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>LEL</th>
+              <th style={{ ...cell, width: 50, whiteSpace: "nowrap" }}>UEL</th>
+              <th style={{ ...cell, width: 30 }}></th>
             </tr></thead>
             <tbody>
               {ics208hm.materials.map(m => (
@@ -2677,7 +2724,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section IV · Hazard Monitoring" icon={AlertTriangle}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="LEL Instrument(s)"><TextInput value={ics208hm.lelInstruments} onChange={e => set({ lelInstruments: e.target.value })} /></Field>
           <Field label="O2 Instrument(s)"><TextInput value={ics208hm.o2Instruments} onChange={e => set({ o2Instruments: e.target.value })} /></Field>
           <Field label="Toxicity/PPM Instrument(s)"><TextInput value={ics208hm.toxicityInstruments} onChange={e => set({ toxicityInstruments: e.target.value })} /></Field>
@@ -2696,7 +2743,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section VI · Site Communications" icon={Radio}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="Command Frequency"><TextInput value={ics208hm.commandFreq} onChange={e => set({ commandFreq: e.target.value })} /></Field>
           <Field label="Tactical Frequency"><TextInput value={ics208hm.tacticalFreq} onChange={e => set({ tacticalFreq: e.target.value })} /></Field>
           <Field label="Entry Frequency"><TextInput value={ics208hm.entryFreq} onChange={e => set({ entryFreq: e.target.value })} /></Field>
@@ -2704,7 +2751,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section VII · Medical Assistance" icon={HeartPulse}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="Medical Monitoring?">
             <Select value={ics208hm.medicalMonitoring} onChange={e => set({ medicalMonitoring: e.target.value })}>
               <option>Yes</option><option>No</option>
@@ -2753,7 +2800,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section XII · Safety Briefing" icon={CheckCircle2}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <Field label="Asst. Safety Officer – HM Signature"><TextInput value={ics208hm.asstSafetyOfficerSignature} onChange={e => set({ asstSafetyOfficerSignature: e.target.value })} placeholder="Type name to sign" /></Field>
           <Field label="Safety Briefing Completed (Time)"><TextInput type="time" value={ics208hm.safetyBriefingTime} onChange={e => set({ safetyBriefingTime: e.target.value })} /></Field>
           <Field label="HM Group Supervisor Signature"><TextInput value={ics208hm.hmGroupSupervisorSignature} onChange={e => set({ hmGroupSupervisorSignature: e.target.value })} placeholder="Type name to sign" /></Field>
@@ -2793,12 +2840,13 @@ const STRUCTURAL_ROWS = [
 ];
 const TIMEFRAME_KEYS = [["h12", "12 Hours"], ["h24", "24 Hours"], ["h48", "48 Hours"], ["h72", "72 Hours"], ["after72", "Anticipated After 72 Hours"]];
 
-function Tab209({ ics209, setIcs209, incident }) {
+function Tab209({ ics209, setIcs209, incident, mapData }) {
   const set = (patch) => setIcs209({ ...ics209, ...patch });
   const setNested = (group, key, field, val) => setIcs209({ ...ics209, [group]: { ...ics209[group], [key]: { ...ics209[group][key], [field]: val } } });
   const setTimeframe = (group, key, val) => setIcs209({ ...ics209, [group]: { ...ics209[group], [key]: val } });
   const toggleFlag = (key) => setIcs209({ ...ics209, threatFlags: { ...ics209.threatFlags, [key]: !ics209.threatFlags[key] } });
   const cell = { padding: "5px 6px", fontSize: 12.5 };
+  const totalAcres = getTotalPerimeterAcres(mapData);
 
   const addCommitment = () => set({ resourceCommitments: [...ics209.resourceCommitments, { id: uid(), agency: "", resources: "", additionalPersonnel: "", totalPersonnel: "", totalResources: "" }] });
   const updateCommitment = (id, patch) => set({ resourceCommitments: ics209.resourceCommitments.map(r => r.id === id ? { ...r, ...patch } : r) });
@@ -2807,38 +2855,40 @@ function Tab209({ ics209, setIcs209, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-209 · Incident Status Summary — Page 1" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-          <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
-          <Field label="Incident Number"><TextInput value={incident.number} disabled style={{ opacity: 0.65 }} /></Field>
+        <IncidentSummaryStrip incident={incident} mapData={mapData} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <Field label="Report Version">
             <Select value={ics209.reportVersion} onChange={e => set({ reportVersion: e.target.value })}>
               <option>Initial</option><option>Update</option><option>Final</option>
             </Select>
           </Field>
           <Field label="Report # (if used)"><TextInput value={ics209.reportNumber} onChange={e => set({ reportNumber: e.target.value })} /></Field>
-          <Field label="Incident Commander(s)"><TextInput value={incident.icName} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Agency/Organization (optional)"><TextInput value={ics209.icAgencyOrg} onChange={e => set({ icAgencyOrg: e.target.value })} placeholder="KFD, or list for Unified Command" /></Field>
           <Field label="Incident Management Organization"><TextInput value={ics209.imTeam} onChange={e => set({ imTeam: e.target.value })} placeholder="Type 1/2/3 IMT, Unified Command..." /></Field>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 14 }}>
-          <Field label="Incident Start Date"><TextInput type="date" value={incident.dateInitiated} disabled style={{ opacity: 0.65 }} /></Field>
-          <Field label="Start Time"><TextInput type="time" value={incident.timeInitiated} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Time Zone"><TextInput value="CST" disabled style={{ opacity: 0.65 }} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginTop: 14 }}>
-          <Field label="Current Size/Area Involved"><TextInput value={ics209.sizeArea} onChange={e => set({ sizeArea: e.target.value })} placeholder="sq mi, acres..." /></Field>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 14 }}>
+          <Field label="Current Size/Area Involved">
+            <TextInput value={ics209.sizeArea} onChange={e => set({ sizeArea: e.target.value })} placeholder="sq mi, acres..." />
+            {totalAcres != null && (
+              <button onClick={() => set({ sizeArea: `${totalAcres.toFixed(1)} acres` })}
+                style={{ background: "none", border: "none", color: COLORS.amber, fontSize: 11, cursor: "pointer", textAlign: "left", padding: "3px 0 0" }}>
+                Use mapped acreage ({totalAcres.toFixed(1)})
+              </button>
+            )}
+          </Field>
           <Field label="% Contained/Completed"><TextInput value={ics209.percentContained} onChange={e => set({ percentContained: e.target.value })} /></Field>
-          <Field label="Incident Definition"><TextInput value={ics209.definition} onChange={e => set({ definition: e.target.value })} placeholder="wildfire, structure fire..." /></Field>
+          <Field label="Incident Definition"><TextInput value={ics209.definition} onChange={e => set({ definition: e.target.value })} placeholder={incident.type || "wildfire, structure fire..."} /></Field>
           <Field label="Complexity Level"><TextInput value={ics209.complexityLevel} onChange={e => set({ complexityLevel: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 14 }}>
           <Field label="For Time Period From"><TextInput type="datetime-local" value={ics209.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
           <Field label="To"><TextInput type="datetime-local" value={ics209.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
         </div>
       </Panel>
 
       <Panel title="Approval & Routing Information" icon={CheckCircle2}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <Field label="Prepared By — Print Name"><TextInput value={ics209.preparedByName} onChange={e => set({ preparedByName: e.target.value })} /></Field>
           <Field label="ICS Position"><TextInput value={ics209.preparedByPosition} onChange={e => set({ preparedByPosition: e.target.value })} /></Field>
           <Field label="Date/Time Prepared"><TextInput type="datetime-local" value={ics209.preparedDateTime} onChange={e => set({ preparedDateTime: e.target.value })} /></Field>
@@ -2852,7 +2902,10 @@ function Tab209({ ics209, setIcs209, incident }) {
       </Panel>
 
       <Panel title="Incident Location Information" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+        <div style={{ fontSize: 12, color: COLORS.faint, marginBottom: 12 }}>
+          Location from the Tactical Worksheet: <strong style={{ color: COLORS.text }}>{incident.location || "—"}</strong>. Add more specific detail below if needed.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <Field label="State"><TextInput value={ics209.state} onChange={e => set({ state: e.target.value })} /></Field>
           <Field label="County/Parish/Borough"><TextInput value={ics209.county} onChange={e => set({ county: e.target.value })} /></Field>
           <Field label="City"><TextInput value={ics209.city} onChange={e => set({ city: e.target.value })} /></Field>
@@ -2874,56 +2927,69 @@ function Tab209({ ics209, setIcs209, incident }) {
         <Field label="Primary Materials or Hazards Involved" wide><TextInput value={ics209.primaryMaterials} onChange={e => set({ primaryMaterials: e.target.value })} style={{ marginTop: 12 }} /></Field>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Damage Assessment — Structural Summary</div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
-            <th style={cell}>Category</th><th style={cell}># Threatened (72hr)</th><th style={cell}># Damaged</th><th style={cell}># Destroyed</th>
-          </tr></thead>
-          <tbody>
-            {STRUCTURAL_ROWS.map(([key, label]) => (
-              <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <td style={cell}>{label}</td>
-                <td style={cell}><TextInput value={ics209.structural[key].threatened} onChange={e => setNested("structural", key, "threatened", e.target.value)} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={ics209.structural[key].damaged} onChange={e => setNested("structural", key, "damaged", e.target.value)} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={ics209.structural[key].destroyed} onChange={e => setNested("structural", key, "destroyed", e.target.value)} style={{ width: 90 }} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+              <th style={{ ...cell, textAlign: "left" }}>Category</th>
+              <th style={{ ...cell, width: 100, whiteSpace: "nowrap" }}># Threatened (72hr)</th>
+              <th style={{ ...cell, width: 100, whiteSpace: "nowrap" }}># Damaged</th>
+              <th style={{ ...cell, width: 100, whiteSpace: "nowrap" }}># Destroyed</th>
+            </tr></thead>
+            <tbody>
+              {STRUCTURAL_ROWS.map(([key, label]) => (
+                <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <td style={cell}>{label}</td>
+                  <td style={cell}><TextInput value={ics209.structural[key].threatened} onChange={e => setNested("structural", key, "threatened", e.target.value)} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={ics209.structural[key].damaged} onChange={e => setNested("structural", key, "damaged", e.target.value)} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={ics209.structural[key].destroyed} onChange={e => setNested("structural", key, "destroyed", e.target.value)} style={{ width: 90 }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <Field label="Other Damage Notes" wide><TextInput value={ics209.damageOther} onChange={e => set({ damageOther: e.target.value })} style={{ marginTop: 12 }} /></Field>
       </Panel>
 
       <Panel title="Page 2 · Public Status Summary" icon={ClipboardList}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
-            <th style={cell}>Category</th><th style={cell}># This Period</th><th style={cell}>Total # to Date</th>
-          </tr></thead>
-          <tbody>
-            {PUBLIC_STATUS_ROWS.map(([key, label]) => (
-              <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <td style={cell}>{label}</td>
-                <td style={cell}><TextInput value={ics209.publicStatus[key].period} onChange={e => setNested("publicStatus", key, "period", e.target.value)} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={ics209.publicStatus[key].total} onChange={e => setNested("publicStatus", key, "total", e.target.value)} style={{ width: 90 }} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+              <th style={{ ...cell, textAlign: "left" }}>Category</th>
+              <th style={{ ...cell, width: 100, whiteSpace: "nowrap" }}># This Period</th>
+              <th style={{ ...cell, width: 110, whiteSpace: "nowrap" }}>Total # to Date</th>
+            </tr></thead>
+            <tbody>
+              {PUBLIC_STATUS_ROWS.map(([key, label]) => (
+                <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <td style={cell}>{label}</td>
+                  <td style={cell}><TextInput value={ics209.publicStatus[key].period} onChange={e => setNested("publicStatus", key, "period", e.target.value)} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={ics209.publicStatus[key].total} onChange={e => setNested("publicStatus", key, "total", e.target.value)} style={{ width: 90 }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <Panel title="Responder Status Summary" icon={ClipboardList}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
-            <th style={cell}>Category</th><th style={cell}># This Period</th><th style={cell}>Total # to Date</th>
-          </tr></thead>
-          <tbody>
-            {RESPONDER_STATUS_ROWS.map(([key, label]) => (
-              <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <td style={cell}>{label}</td>
-                <td style={cell}><TextInput value={ics209.responderStatus[key].period} onChange={e => setNested("responderStatus", key, "period", e.target.value)} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={ics209.responderStatus[key].total} onChange={e => setNested("responderStatus", key, "total", e.target.value)} style={{ width: 90 }} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+              <th style={{ ...cell, textAlign: "left" }}>Category</th>
+              <th style={{ ...cell, width: 100, whiteSpace: "nowrap" }}># This Period</th>
+              <th style={{ ...cell, width: 110, whiteSpace: "nowrap" }}>Total # to Date</th>
+            </tr></thead>
+            <tbody>
+              {RESPONDER_STATUS_ROWS.map(([key, label]) => (
+                <tr key={key} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <td style={cell}>{label}</td>
+                  <td style={cell}><TextInput value={ics209.responderStatus[key].period} onChange={e => setNested("responderStatus", key, "period", e.target.value)} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={ics209.responderStatus[key].total} onChange={e => setNested("responderStatus", key, "total", e.target.value)} style={{ width: 90 }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <Panel title="Life, Safety, and Health" icon={AlertTriangle}>
@@ -2962,7 +3028,7 @@ function Tab209({ ics209, setIcs209, incident }) {
       <Panel title="Strategic Discussion & Planning" icon={ClipboardList}>
         <Field label="Strategic Discussion" wide><TextArea value={ics209.strategicDiscussion} onChange={e => set({ strategicDiscussion: e.target.value })} style={{ minHeight: 70 }} /></Field>
         <Field label="Planned Actions for Next Operational Period" wide><TextArea value={ics209.plannedActions} onChange={e => set({ plannedActions: e.target.value })} style={{ minHeight: 60, marginTop: 12 }} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 12 }}>
           <Field label="Projected Final Incident Size/Area"><TextInput value={ics209.projectedFinalSize} onChange={e => set({ projectedFinalSize: e.target.value })} /></Field>
           <Field label="Anticipated Management Completion Date"><TextInput type="date" value={ics209.completionDate} onChange={e => set({ completionDate: e.target.value })} /></Field>
           <Field label="Projected Demob Start Date"><TextInput type="date" value={ics209.demobStartDate} onChange={e => set({ demobStartDate: e.target.value })} /></Field>
@@ -2973,24 +3039,30 @@ function Tab209({ ics209, setIcs209, incident }) {
       </Panel>
 
       <Panel title="Page 4 · Incident Resource Commitment Summary" icon={Truck} right={<Btn kind="subtle" icon={Plus} onClick={addCommitment}>Add Row</Btn>}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
-            <th style={cell}>Agency/Organization</th><th style={cell}>Resources (category/kind/type)</th>
-            <th style={cell}>Additional Personnel</th><th style={cell}>Total Personnel</th><th style={cell}>Total Resources</th><th style={cell}></th>
-          </tr></thead>
-          <tbody>
-            {ics209.resourceCommitments.map(r => (
-              <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <td style={cell}><TextInput value={r.agency} onChange={e => updateCommitment(r.id, { agency: e.target.value })} style={{ width: 140 }} /></td>
-                <td style={cell}><TextInput value={r.resources} onChange={e => updateCommitment(r.id, { resources: e.target.value })} style={{ width: 200 }} placeholder="e.g. Type 1 Engines 3/12" /></td>
-                <td style={cell}><TextInput value={r.additionalPersonnel} onChange={e => updateCommitment(r.id, { additionalPersonnel: e.target.value })} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={r.totalPersonnel} onChange={e => updateCommitment(r.id, { totalPersonnel: e.target.value })} style={{ width: 90 }} /></td>
-                <td style={cell}><TextInput value={r.totalResources} onChange={e => updateCommitment(r.id, { totalResources: e.target.value })} style={{ width: 90 }} /></td>
-                <td style={cell}><button onClick={() => removeCommitment(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+              <th style={{ ...cell, width: 140, whiteSpace: "nowrap" }}>Agency/Organization</th>
+              <th style={{ ...cell, width: 200, whiteSpace: "nowrap" }}>Resources (category/kind/type)</th>
+              <th style={{ ...cell, width: 90, whiteSpace: "nowrap" }}>Additional Personnel</th>
+              <th style={{ ...cell, width: 90, whiteSpace: "nowrap" }}>Total Personnel</th>
+              <th style={{ ...cell, width: 90, whiteSpace: "nowrap" }}>Total Resources</th>
+              <th style={{ ...cell, width: 30 }}></th>
+            </tr></thead>
+            <tbody>
+              {ics209.resourceCommitments.map(r => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <td style={cell}><TextInput value={r.agency} onChange={e => updateCommitment(r.id, { agency: e.target.value })} style={{ width: 140 }} /></td>
+                  <td style={cell}><TextInput value={r.resources} onChange={e => updateCommitment(r.id, { resources: e.target.value })} style={{ width: 200 }} placeholder="e.g. Type 1 Engines 3/12" /></td>
+                  <td style={cell}><TextInput value={r.additionalPersonnel} onChange={e => updateCommitment(r.id, { additionalPersonnel: e.target.value })} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={r.totalPersonnel} onChange={e => updateCommitment(r.id, { totalPersonnel: e.target.value })} style={{ width: 90 }} /></td>
+                  <td style={cell}><TextInput value={r.totalResources} onChange={e => updateCommitment(r.id, { totalResources: e.target.value })} style={{ width: 90 }} /></td>
+                  <td style={cell}><button onClick={() => removeCommitment(r.id)} style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><Trash2 size={14} /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {ics209.resourceCommitments.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>None entered.</div>}
         <Field label="Additional Cooperating and Assisting Organizations Not Listed Above" wide><TextArea value={ics209.cooperatingOrgs} onChange={e => set({ cooperatingOrgs: e.target.value })} style={{ minHeight: 50, marginTop: 12 }} /></Field>
       </Panel>
@@ -3308,8 +3380,8 @@ function TabICSForms(props) {
       {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} incident={props.incident} />}
       {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
       {selected === "208" && <Tab208 ics208={props.ics208} setIcs208={props.setIcs208} incident={props.incident} />}
-      {selected === "208hm" && <Tab208HM ics208hm={props.ics208hm} setIcs208hm={props.setIcs208hm} incident={props.incident} />}
-      {selected === "209" && <Tab209 ics209={props.ics209} setIcs209={props.setIcs209} incident={props.incident} />}
+      {selected === "208hm" && <Tab208HM ics208hm={props.ics208hm} setIcs208hm={props.setIcs208hm} incident={props.incident} mapData={props.mapData} />}
+      {selected === "209" && <Tab209 ics209={props.ics209} setIcs209={props.setIcs209} incident={props.incident} mapData={props.mapData} />}
       {selected === "206" && <Tab206 ics206={props.ics206} setIcs206={props.setIcs206} incident={props.incident} />}
       {selected === "214" && <Tab214 logs={props.logs} setLogs={props.setLogs} />}
     </div>
@@ -5699,6 +5771,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                   ics209={ics209} setIcs209={setIcs209}
                   ics206={ics206} setIcs206={setIcs206}
                   logs={logs} setLogs={setLogs}
+                  mapData={mapData}
                   objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset}
                   formsUsed={formsUsed} toggleFormUsed={toggleFormUsed}
                 />
