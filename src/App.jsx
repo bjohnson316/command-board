@@ -435,7 +435,17 @@ const inputStyle = {
   padding: "8px 10px",
   fontSize: 14,
   lineHeight: "20px",
-  height: 38,
+  // minHeight, not a fixed height — a fixed height forces every
+  // input down to exactly this size, but iOS Safari's native
+  // date/time widgets have their own enforced minimum height that a
+  // smaller fixed height can't shrink them below, which made the
+  // mismatch worse (plain text fields obediently shrank to the fixed
+  // size; date/time fields couldn't and stayed at their own larger
+  // minimum). minHeight instead gives every field the same floor
+  // without capping anything — if a date/time field genuinely needs
+  // to be taller on some device, plain text fields sharing the same
+  // minHeight grow to match it instead of the two drifting apart.
+  minHeight: 44,
   fontFamily: "'IBM Plex Sans', sans-serif",
   outline: "none",
 };
