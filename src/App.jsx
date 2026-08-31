@@ -1974,6 +1974,15 @@ function TabWeather() {
   useEffect(() => { radarIndexRef.current = radarIndex; }, [radarIndex]);
   const [radarPlaying, setRadarPlaying] = useState(false);
   const [radarError, setRadarError] = useState("");
+  // Tracks whether the map instance actually exists yet — mapRef is a
+  // ref precisely so mutating it doesn't trigger re-renders, but that
+  // also means nothing re-runs the radar pre-load effect once the map
+  // becomes available if the radar metadata happened to finish
+  // fetching first (a real race: metadata is a plain JSON fetch,
+  // often faster than GPS resolving). This flag exists purely so that
+  // effect has something to depend on that changes at the right
+  // moment.
+  const [mapReady, setMapReady] = useState(false);
   const [radarDebug, setRadarDebug] = useState(""); // on-screen diagnostic, since mobile Safari's console isn't easily reachable
   const radarTimerRef = useRef(null);
 
@@ -2049,7 +2058,8 @@ function TabWeather() {
     }).addTo(map);
     gpsMarkerRef.current = L.marker([coords.lat, coords.lng]).addTo(map).bindPopup("Your location");
     setTimeout(() => map.invalidateSize(), 100);
-    return () => { map.remove(); mapRef.current = null; radarLayersRef.current = {}; };
+    setMapReady(true);
+    return () => { map.remove(); mapRef.current = null; radarLayersRef.current = {}; setMapReady(false); };
   }, [coords]);
 
   // Pre-creates a tile layer for every available frame so frame
@@ -2073,7 +2083,12 @@ function TabWeather() {
   // before, while still arriving at every frame being cached for
   // smooth animation once loading finishes.
   useEffect(() => {
-    if (!mapRef.current || !radarFrames.length || !radarHost) return;
+    if (!mapRef.current || !radarFrames.length || !radarHost) {
+      if (radarFrames.length && radarHost && !mapRef.current) {
+        setRadarDebug("Radar data ready, waiting for the map to finish mounting...");
+      }
+      return;
+    }
     let cancelled = false;
 
     // Guards against a real timing risk: if radar metadata finishes
@@ -2141,7 +2156,7 @@ function TabWeather() {
     loadNext(0);
 
     return () => { cancelled = true; };
-  }, [radarFrames, radarHost]);
+  }, [radarFrames, radarHost, mapReady]);
 
   // Instant — every frame's tiles are already loaded by the effect
   // above, so this never triggers a network request.
