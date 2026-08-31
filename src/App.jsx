@@ -556,19 +556,19 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Tactical Worksheet" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
           <Field label="Incident Name"><TextInput value={incident.name} onChange={e => setIncident({ ...incident, name: e.target.value })} placeholder="e.g. County Rd 411 Structure" /></Field>
           <Field label="Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} placeholder="Dispatch / CAD #" /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
           <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Date Terminated"><TextInput type="date" value={incident.dateTerminated} onChange={e => setIncident({ ...incident, dateTerminated: e.target.value })} /></Field>
           <Field label="Time Terminated"><TextInput type="time" value={incident.timeTerminated} onChange={e => setIncident({ ...incident, timeTerminated: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
             <Select value={incident.type} onChange={e => setIncident({ ...incident, type: e.target.value })}>
               {INCIDENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.v}</option>)}
@@ -649,7 +649,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>Prepared By</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
           <Field label="Name"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
           <Field label="Position / Title"><TextInput value={incident.prepPosition} onChange={e => setIncident({ ...incident, prepPosition: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={incident.prepSignature} onChange={e => setIncident({ ...incident, prepSignature: e.target.value })} placeholder="Type name to sign" /></Field>
@@ -658,7 +658,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
       </Panel>
 
       <Panel title="Resource Board Status" icon={Truck}>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, 1fr)`, gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 10 }}>
           {counts.map(c => (
             <div key={c.status} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: "10px 8px", textAlign: "center" }}>
               <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, color: STATUS_COLOR[c.status] }}>{c.n}</div>
@@ -1920,7 +1920,7 @@ function TabComms({ comms, setComms, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-205 · Incident Radio Communications Plan" icon={Radio}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Date / Time Prepared"><TextInput type="datetime-local" value={comms.dateTimePrepared} onChange={e => set({ dateTimePrepared: e.target.value })} /></Field>
           <Field label="Operational Period From"><TextInput type="datetime-local" value={comms.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
@@ -1974,7 +1974,7 @@ function TabComms({ comms, setComms, incident }) {
           <TextArea value={comms.specialInstructions} onChange={e => set({ specialInstructions: e.target.value })} style={{ minHeight: 60 }}
             placeholder="Cross-band repeaters, secure voice, encoders, PL tones, incident-within-an-incident handling..." />
         </Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 12 }}>
           <Field label="Prepared By (Communications Unit Leader)"><TextInput value={comms.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={comms.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
           <Field label="Date / Time"><TextInput type="datetime-local" value={comms.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
@@ -2082,11 +2082,11 @@ function Tab208({ ics208, setIcs208, incident }) {
   const set = (patch) => setIcs208({ ...ics208, ...patch });
   return (
     <Panel title="ICS-208 · Safety Message / Plan" icon={AlertTriangle}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
         <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
         <Field label="Date / Time Prepared"><TextInput type="datetime-local" value={ics208.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14 }}>
         <Field label="Operational Period From"><TextInput type="datetime-local" value={ics208.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
         <Field label="Operational Period To"><TextInput type="datetime-local" value={ics208.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
       </div>
@@ -2096,7 +2096,7 @@ function Tab208({ ics208, setIcs208, incident }) {
             placeholder="Clear, concise statements for safety message(s), priorities, and key command emphasis/decisions/directions. Known safety hazards and specific precautions for this operational period..." />
         </Field>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginTop: 14, alignItems: "end" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14, alignItems: "end" }}>
         <Field label="4. Site Safety Plan Required?">
           <Select value={ics208.siteSafetyPlanRequired} onChange={e => set({ siteSafetyPlanRequired: e.target.value })}>
             <option>Yes</option><option>No</option>
@@ -2105,7 +2105,7 @@ function Tab208({ ics208, setIcs208, incident }) {
         <Field label="Approved Site Safety Plan(s) Located At"><TextInput value={ics208.siteSafetyPlanLocation} onChange={e => set({ siteSafetyPlanLocation: e.target.value })} /></Field>
       </div>
       <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>5. Prepared By</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         <Field label="Name"><TextInput value={ics208.preparedBy} onChange={e => set({ preparedBy: e.target.value })} /></Field>
         <Field label="Position / Title"><TextInput value={ics208.position} onChange={e => set({ position: e.target.value })} placeholder="Safety Officer" /></Field>
         <Field label="Signature"><TextInput value={ics208.signature} onChange={e => set({ signature: e.target.value })} placeholder="Type name to sign" /></Field>
@@ -2138,10 +2138,10 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-208 HM · Site Safety and Control Plan" icon={AlertTriangle}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Date Prepared"><TextInput type="datetime-local" value={ics208hm.dateTime} onChange={e => set({ dateTime: e.target.value })} /></Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8 }}>
             <Field label="Op. Period From"><TextInput type="datetime-local" value={ics208hm.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
             <Field label="Op. Period To"><TextInput type="datetime-local" value={ics208hm.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
           </div>
@@ -2152,7 +2152,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section II · Organization" icon={Users}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
           <Field label="Incident Commander"><TextInput value={ics208hm.orgIC} onChange={e => set({ orgIC: e.target.value })} /></Field>
           <Field label="HM Group Supervisor"><TextInput value={ics208hm.orgHMGroupSupervisor} onChange={e => set({ orgHMGroupSupervisor: e.target.value })} /></Field>
           <Field label="Tech. Specialist – HM Reference"><TextInput value={ics208hm.orgTechSpecialist} onChange={e => set({ orgTechSpecialist: e.target.value })} /></Field>
@@ -2168,7 +2168,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Entry Team (Buddy System)</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
           {ics208hm.entryTeam.map(m => (
             <div key={m.id}>
               <Field label={m.label}><TextInput value={m.name} onChange={e => updateTeam("entryTeam", m.id, { name: e.target.value })} placeholder="Name" /></Field>
@@ -2178,7 +2178,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
         </div>
 
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Decontamination Element</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
           {ics208hm.deconTeam.map(m => (
             <div key={m.id}>
               <Field label={m.label}><TextInput value={m.name} onChange={e => updateTeam("deconTeam", m.id, { name: e.target.value })} placeholder="Name" /></Field>
@@ -2223,7 +2223,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section IV · Hazard Monitoring" icon={AlertTriangle}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="LEL Instrument(s)"><TextInput value={ics208hm.lelInstruments} onChange={e => set({ lelInstruments: e.target.value })} /></Field>
           <Field label="O2 Instrument(s)"><TextInput value={ics208hm.o2Instruments} onChange={e => set({ o2Instruments: e.target.value })} /></Field>
           <Field label="Toxicity/PPM Instrument(s)"><TextInput value={ics208hm.toxicityInstruments} onChange={e => set({ toxicityInstruments: e.target.value })} /></Field>
@@ -2242,7 +2242,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section VI · Site Communications" icon={Radio}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
           <Field label="Command Frequency"><TextInput value={ics208hm.commandFreq} onChange={e => set({ commandFreq: e.target.value })} /></Field>
           <Field label="Tactical Frequency"><TextInput value={ics208hm.tacticalFreq} onChange={e => set({ tacticalFreq: e.target.value })} /></Field>
           <Field label="Entry Frequency"><TextInput value={ics208hm.entryFreq} onChange={e => set({ entryFreq: e.target.value })} /></Field>
@@ -2250,7 +2250,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section VII · Medical Assistance" icon={HeartPulse}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="Medical Monitoring?">
             <Select value={ics208hm.medicalMonitoring} onChange={e => set({ medicalMonitoring: e.target.value })}>
               <option>Yes</option><option>No</option>
@@ -2299,7 +2299,7 @@ function Tab208HM({ ics208hm, setIcs208hm, incident }) {
       </Panel>
 
       <Panel title="Section XII · Safety Briefing" icon={CheckCircle2}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="Asst. Safety Officer – HM Signature"><TextInput value={ics208hm.asstSafetyOfficerSignature} onChange={e => set({ asstSafetyOfficerSignature: e.target.value })} placeholder="Type name to sign" /></Field>
           <Field label="Safety Briefing Completed (Time)"><TextInput type="time" value={ics208hm.safetyBriefingTime} onChange={e => set({ safetyBriefingTime: e.target.value })} /></Field>
           <Field label="HM Group Supervisor Signature"><TextInput value={ics208hm.hmGroupSupervisorSignature} onChange={e => set({ hmGroupSupervisorSignature: e.target.value })} placeholder="Type name to sign" /></Field>
@@ -2353,7 +2353,7 @@ function Tab209({ ics209, setIcs209, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-209 · Incident Status Summary — Page 1" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Incident Number"><TextInput value={incident.number} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Report Version">
@@ -2366,25 +2366,25 @@ function Tab209({ ics209, setIcs209, incident }) {
           <Field label="Agency/Organization (optional)"><TextInput value={ics209.icAgencyOrg} onChange={e => set({ icAgencyOrg: e.target.value })} placeholder="KFD, or list for Unified Command" /></Field>
           <Field label="Incident Management Organization"><TextInput value={ics209.imTeam} onChange={e => set({ imTeam: e.target.value })} placeholder="Type 1/2/3 IMT, Unified Command..." /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 14 }}>
           <Field label="Incident Start Date"><TextInput type="date" value={incident.dateInitiated} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Start Time"><TextInput type="time" value={incident.timeInitiated} disabled style={{ opacity: 0.65 }} /></Field>
           <Field label="Time Zone"><TextInput value="CST" disabled style={{ opacity: 0.65 }} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginTop: 14 }}>
           <Field label="Current Size/Area Involved"><TextInput value={ics209.sizeArea} onChange={e => set({ sizeArea: e.target.value })} placeholder="sq mi, acres..." /></Field>
           <Field label="% Contained/Completed"><TextInput value={ics209.percentContained} onChange={e => set({ percentContained: e.target.value })} /></Field>
           <Field label="Incident Definition"><TextInput value={ics209.definition} onChange={e => set({ definition: e.target.value })} placeholder="wildfire, structure fire..." /></Field>
           <Field label="Complexity Level"><TextInput value={ics209.complexityLevel} onChange={e => set({ complexityLevel: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14 }}>
           <Field label="For Time Period From"><TextInput type="datetime-local" value={ics209.opFrom} onChange={e => set({ opFrom: e.target.value })} /></Field>
           <Field label="To"><TextInput type="datetime-local" value={ics209.opTo} onChange={e => set({ opTo: e.target.value })} /></Field>
         </div>
       </Panel>
 
       <Panel title="Approval & Routing Information" icon={CheckCircle2}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
           <Field label="Prepared By — Print Name"><TextInput value={ics209.preparedByName} onChange={e => set({ preparedByName: e.target.value })} /></Field>
           <Field label="ICS Position"><TextInput value={ics209.preparedByPosition} onChange={e => set({ preparedByPosition: e.target.value })} /></Field>
           <Field label="Date/Time Prepared"><TextInput type="datetime-local" value={ics209.preparedDateTime} onChange={e => set({ preparedDateTime: e.target.value })} /></Field>
@@ -2398,7 +2398,7 @@ function Tab209({ ics209, setIcs209, incident }) {
       </Panel>
 
       <Panel title="Incident Location Information" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
           <Field label="State"><TextInput value={ics209.state} onChange={e => set({ state: e.target.value })} /></Field>
           <Field label="County/Parish/Borough"><TextInput value={ics209.county} onChange={e => set({ county: e.target.value })} /></Field>
           <Field label="City"><TextInput value={ics209.city} onChange={e => set({ city: e.target.value })} /></Field>
@@ -2475,7 +2475,7 @@ function Tab209({ ics209, setIcs209, incident }) {
       <Panel title="Life, Safety, and Health" icon={AlertTriangle}>
         <Field label="Status/Threat Remarks" wide><TextArea value={ics209.threatRemarks} onChange={e => set({ threatRemarks: e.target.value })} style={{ minHeight: 60 }} /></Field>
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Threat Management (check if active)</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
           {THREAT_FLAG_OPTIONS.map(([key, label]) => (
             <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
               <input type="checkbox" checked={ics209.threatFlags[key]} onChange={() => toggleFlag(key)} style={{ width: 16, height: 16 }} />
@@ -2508,7 +2508,7 @@ function Tab209({ ics209, setIcs209, incident }) {
       <Panel title="Strategic Discussion & Planning" icon={ClipboardList}>
         <Field label="Strategic Discussion" wide><TextArea value={ics209.strategicDiscussion} onChange={e => set({ strategicDiscussion: e.target.value })} style={{ minHeight: 70 }} /></Field>
         <Field label="Planned Actions for Next Operational Period" wide><TextArea value={ics209.plannedActions} onChange={e => set({ plannedActions: e.target.value })} style={{ minHeight: 60, marginTop: 12 }} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
           <Field label="Projected Final Incident Size/Area"><TextInput value={ics209.projectedFinalSize} onChange={e => set({ projectedFinalSize: e.target.value })} /></Field>
           <Field label="Anticipated Management Completion Date"><TextInput type="date" value={ics209.completionDate} onChange={e => set({ completionDate: e.target.value })} /></Field>
           <Field label="Projected Demob Start Date"><TextInput type="date" value={ics209.demobStartDate} onChange={e => set({ demobStartDate: e.target.value })} /></Field>
@@ -2556,9 +2556,9 @@ function Tab206({ ics206, setIcs206, incident }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-206 · Medical Plan" icon={HeartPulse}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 12 }}>
             <Field label="Operational Period From"><TextInput type="datetime-local" value={ics206.opFrom} onChange={e => setIcs206({ ...ics206, opFrom: e.target.value })} /></Field>
             <Field label="Operational Period To"><TextInput type="datetime-local" value={ics206.opTo} onChange={e => setIcs206({ ...ics206, opTo: e.target.value })} /></Field>
           </div>
@@ -2667,12 +2667,12 @@ function Tab206({ ics206, setIcs206, incident }) {
           <input type="checkbox" checked={ics206.aviationAssets} onChange={e => setIcs206({ ...ics206, aviationAssets: e.target.checked })} style={{ width: 18, height: 18 }} />
           Check if aviation assets are utilized for rescue (coordinate with Air Operations)
         </label>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 16 }}>
           <Field label="7. Prepared By (Medical Unit Leader)"><TextInput value={ics206.preparedBy} onChange={e => setIcs206({ ...ics206, preparedBy: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={ics206.preparedSignature} onChange={e => setIcs206({ ...ics206, preparedSignature: e.target.value })} placeholder="Type name to sign" /></Field>
           <Field label="Date / Time"><TextInput type="datetime-local" value={ics206.dateTime} onChange={e => setIcs206({ ...ics206, dateTime: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
           <Field label="8. Approved By (Safety Officer)"><TextInput value={ics206.approvedBy} onChange={e => setIcs206({ ...ics206, approvedBy: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={ics206.approvedSignature} onChange={e => setIcs206({ ...ics206, approvedSignature: e.target.value })} placeholder="Type name to sign" /></Field>
         </div>
@@ -2713,11 +2713,11 @@ function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="ICS-201 · Incident Briefing (Official Form)" icon={ClipboardList}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
           <Field label="1. Incident Name"><TextInput value={incident.name} onChange={e => setIncident({ ...incident, name: e.target.value })} /></Field>
           <Field label="2. Incident Number"><TextInput value={incident.number} onChange={e => setIncident({ ...incident, number: e.target.value })} /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="3. Date Initiated"><TextInput type="date" value={incident.dateInitiated} onChange={e => setIncident({ ...incident, dateInitiated: e.target.value })} /></Field>
           <Field label="Time Initiated"><TextInput type="time" value={incident.timeInitiated} onChange={e => setIncident({ ...incident, timeInitiated: e.target.value })} /></Field>
         </div>
@@ -2732,7 +2732,7 @@ function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset
           </Field>
         </div>
         <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "18px 0 8px" }}>6. Prepared By</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
           <Field label="Name"><TextInput value={incident.preparedBy} onChange={e => setIncident({ ...incident, preparedBy: e.target.value })} /></Field>
           <Field label="Position / Title"><TextInput value={incident.prepPosition} onChange={e => setIncident({ ...incident, prepPosition: e.target.value })} /></Field>
           <Field label="Signature"><TextInput value={incident.prepSignature} onChange={e => setIncident({ ...incident, prepSignature: e.target.value })} placeholder="Type name to sign" /></Field>
@@ -3004,7 +3004,7 @@ function Tab214({ logs, setLogs }) {
           </div>
           {log && (
             <div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr)) auto", gap: 10, marginBottom: 14 }}>
                 <Field label="Name"><TextInput value={log.name} onChange={e => updateLog(log.id, { name: e.target.value })} /></Field>
                 <Field label="ICS Position"><TextInput value={log.position} onChange={e => updateLog(log.id, { position: e.target.value })} /></Field>
                 <Field label="Home Agency"><TextInput value={log.agency} onChange={e => updateLog(log.id, { agency: e.target.value })} /></Field>
@@ -3047,13 +3047,13 @@ function Tab215A({ safety, setSafety, org, incident }) {
 
   return (
     <Panel title="ICS-215A · Incident Action Plan Safety Analysis" icon={AlertTriangle} right={<Btn kind="subtle" icon={Plus} onClick={addRow}>Add Hazard</Btn>}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
         <Field label="Incident Name"><TextInput value={incident.name} disabled style={{ opacity: 0.65 }} /></Field>
         <Field label="Incident Number"><TextInput value={incident.number} disabled style={{ opacity: 0.65 }} /></Field>
       </div>
 
       <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "16px 0 8px" }}>Operational Period</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
         <Field label="Date / Time From"><TextInput type="datetime-local" value={safety.opFrom} onChange={e => setSafety({ ...safety, opFrom: e.target.value })} /></Field>
         <Field label="Date / Time To"><TextInput type="datetime-local" value={safety.opTo} onChange={e => setSafety({ ...safety, opTo: e.target.value })} /></Field>
       </div>
@@ -3089,7 +3089,7 @@ function Tab215A({ safety, setSafety, org, incident }) {
       </div>
 
       <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", margin: "20px 0 8px" }}>Prepared By (Safety Officer)</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         <Field label="Name"><TextInput value={safety.preparedBy} onChange={e => setSafety({ ...safety, preparedBy: e.target.value })} placeholder={org.commandStaff.find(c => c.title === "Safety Officer")?.name || "Name"} /></Field>
         <Field label="Position / Title"><TextInput value={safety.position} onChange={e => setSafety({ ...safety, position: e.target.value })} placeholder="Safety Officer" /></Field>
         <Field label="Signature"><TextInput value={safety.signature} onChange={e => setSafety({ ...safety, signature: e.target.value })} placeholder="Type name to sign" /></Field>
