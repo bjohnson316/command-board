@@ -4,7 +4,7 @@ import {
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
-  Map as MapIcon, Crosshair
+  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -1843,6 +1843,186 @@ function TabMapping({ mapData, setMapData }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Standard WMO weather interpretation codes (used by Open-Meteo and
+// most other weather APIs) mapped to plain-language descriptions.
+const WMO_WEATHER_DESCRIPTIONS = {
+  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+  45: "Fog", 48: "Depositing rime fog",
+  51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+  56: "Light freezing drizzle", 57: "Dense freezing drizzle",
+  61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+  66: "Light freezing rain", 67: "Heavy freezing rain",
+  71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains",
+  80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
+  85: "Slight snow showers", 86: "Heavy snow showers",
+  95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail",
+};
+const weatherCodeDescription = (code) => WMO_WEATHER_DESCRIPTIONS[code] || "Unknown";
+
+function TabWeather() {
+  const [coords, setCoords] = useState(null); // { lat, lng }
+  const [locError, setLocError] = useState("");
+  const [current, setCurrent] = useState(null);
+  const [currentLoading, setCurrentLoading] = useState(false);
+  const [currentError, setCurrentError] = useState("");
+
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const gpsMarkerRef = useRef(null);
+  const radarLayerRef = useRef(null);
+  const [radarFrames, setRadarFrames] = useState([]); // [{ time, path }, ...] past + nowcast
+  const [radarHost, setRadarHost] = useState("");
+  const [radarIndex, setRadarIndex] = useState(0);
+  const [radarPlaying, setRadarPlaying] = useState(false);
+  const [radarError, setRadarError] = useState("");
+  const radarTimerRef = useRef(null);
+
+  const fetchCurrentConditions = (lat, lng) => {
+    setCurrentLoading(true);
+    setCurrentError("");
+    // Open-Meteo — free, no API key or account required, same
+    // service already used for the Tactical Worksheet's weather
+    // auto-fill.
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`)
+      .then(res => { if (!res.ok) throw new Error("bad response"); return res.json(); })
+      .then(data => { setCurrent(data.current); setCurrentLoading(false); })
+      .catch(() => { setCurrentError("Couldn't load current conditions. Check your connection and try Refresh."); setCurrentLoading(false); });
+  };
+
+  const fetchRadarFrames = () => {
+    setRadarError("");
+    // RainViewer — free, no API key or account required, for
+    // publicly-shared radar mosaic tiles compatible with Leaflet the
+    // same way the street/satellite base layers already are.
+    fetch("https://api.rainviewer.com/public/weather-maps.json")
+      .then(res => { if (!res.ok) throw new Error("bad response"); return res.json(); })
+      .then(data => {
+        const past = data.radar.past || [];
+        const nowcast = data.radar.nowcast || [];
+        const frames = [...past, ...nowcast];
+        setRadarFrames(frames);
+        setRadarHost(data.host);
+        setRadarIndex(Math.max(0, past.length - 1)); // start on the most recent actual (non-forecast) frame
+      })
+      .catch(() => setRadarError("Couldn't load radar data. Check your connection and try Refresh."));
+  };
+
+  useEffect(() => {
+    if (!navigator.geolocation) { setLocError("This device/browser doesn't support GPS location."); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setCoords({ lat: latitude, lng: longitude });
+        fetchCurrentConditions(latitude, longitude);
+      },
+      (err) => setLocError(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
+      { enableHighAccuracy: false, maximumAge: 300000 }
+    );
+    fetchRadarFrames();
+    // Keeps the radar genuinely "live" while this tab stays open —
+    // RainViewer publishes a new frame roughly every 10 minutes.
+    const interval = setInterval(fetchRadarFrames, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mounts the radar map once GPS location is known — mirrors the
+  // Mapping tab's own mount-once pattern.
+  useEffect(() => {
+    if (!coords || !containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, { center: [coords.lat, coords.lng], zoom: 8 });
+    mapRef.current = map;
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    gpsMarkerRef.current = L.marker([coords.lat, coords.lng]).addTo(map).bindPopup("Your location");
+    setTimeout(() => map.invalidateSize(), 100);
+    return () => { map.remove(); mapRef.current = null; };
+  }, [coords]);
+
+  // Swaps in the radar tile overlay whenever the available frames or
+  // the currently-displayed frame changes.
+  useEffect(() => {
+    if (!mapRef.current || !radarFrames.length || !radarHost) return;
+    const frame = radarFrames[radarIndex];
+    if (!frame) return;
+    const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
+    if (radarLayerRef.current) mapRef.current.removeLayer(radarLayerRef.current);
+    radarLayerRef.current = L.tileLayer(url, { opacity: 0.75, maxZoom: 12, zIndex: 500 }).addTo(mapRef.current);
+  }, [radarFrames, radarHost, radarIndex]);
+
+  // Loops through the available frames for an animated "live" radar
+  // view rather than just a single static snapshot.
+  useEffect(() => {
+    if (!radarPlaying || radarFrames.length === 0) return;
+    radarTimerRef.current = setInterval(() => {
+      setRadarIndex(i => (i + 1) % radarFrames.length);
+    }, 600);
+    return () => clearInterval(radarTimerRef.current);
+  }, [radarPlaying, radarFrames.length]);
+
+  const refreshAll = () => {
+    if (coords) fetchCurrentConditions(coords.lat, coords.lng);
+    fetchRadarFrames();
+  };
+
+  const activeFrame = radarFrames[radarIndex];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Panel title="Current Weather" icon={CloudSun} right={
+        <Btn kind="subtle" icon={RefreshCw} onClick={refreshAll} style={{ padding: "6px 11px", fontSize: 12.5 }}>Refresh</Btn>
+      }>
+        {locError && <div style={{ fontSize: 13, color: COLORS.dangerText }}>{locError}</div>}
+        {!locError && currentLoading && <div style={{ fontSize: 13, color: COLORS.faint }}>Getting your location and current conditions...</div>}
+        {currentError && <div style={{ fontSize: 13, color: COLORS.dangerText }}>{currentError}</div>}
+        {current && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Temp</div>
+              <div style={{ fontSize: 26, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.temperature_2m)}°F</div>
+              <div style={{ fontSize: 11.5, color: COLORS.faint }}>Feels like {Math.round(current.apparent_temperature)}°F</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Wind</div>
+              <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.wind_speed_10m)} mph {degreesToCompass(current.wind_direction_10m)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Humidity</div>
+              <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.relative_humidity_2m)}%</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conditions</div>
+              <div style={{ fontSize: 16, marginTop: 4 }}>{weatherCodeDescription(current.weather_code)}</div>
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Live Radar" icon={CloudSun} right={
+        radarFrames.length > 0 && (
+          <Btn kind={radarPlaying ? "solid" : "subtle"} icon={radarPlaying ? Pause : Play} onClick={() => setRadarPlaying(p => !p)} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            {radarPlaying ? "Pause" : "Animate"}
+          </Btn>
+        )
+      }>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
+          Centered on your current GPS location. Pan and zoom like any other map — the radar overlay updates automatically every 5 minutes, and Animate loops through the recent frames for a moving view of the storm.
+          {radarError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{radarError}</span>}
+          {!coords && !locError && <span style={{ display: "block", marginTop: 4 }}>Waiting for GPS location...</span>}
+        </div>
+        <div ref={containerRef} style={{ width: "100%", height: "60vh", minHeight: 380, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
+        {activeFrame && (
+          <div style={{ fontSize: 11.5, color: COLORS.faint, marginTop: 6, fontFamily: "'IBM Plex Mono', monospace" }}>
+            Frame: {new Date(activeFrame.time * 1000).toLocaleTimeString()}
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -4627,6 +4807,7 @@ const TABS = [
   { k: "201", label: "Tactical Worksheet", icon: ClipboardList },
   { k: "resources", label: "Resource Board", icon: Truck },
   { k: "mapping", label: "Mapping", icon: MapIcon },
+  { k: "weather", label: "Weather", icon: CloudSun },
   { k: "org", label: "Org Chart", icon: Users },
   { k: "rehab", label: "Rehab", icon: HeartPulse },
   { k: "icsforms", label: "ICS Forms", icon: Layers },
@@ -5231,6 +5412,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
+              {tab === "weather" && <TabWeather />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
