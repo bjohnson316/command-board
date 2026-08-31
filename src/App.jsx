@@ -1924,14 +1924,19 @@ function heatIndexCategory(hi) {
 const HEAT_INDEX_MATRIX_TEMPS = [80, 85, 90, 95, 100, 105, 110];
 const HEAT_INDEX_MATRIX_RH = [40, 50, 60, 70, 80, 90, 100];
 
-function HeatIndexMatrix({ currentTemp, currentRh }) {
-  // Snaps the actual current reading to the nearest chart cell so it
-  // can be highlighted — purely a visual reference aid, not used in
-  // the displayed heat index number itself (that's the exact
-  // calculation, not a chart lookup).
-  const closest = (value, options) => options.reduce((a, b) => Math.abs(b - value) < Math.abs(a - value) ? b : a);
-  const highlightTemp = currentTemp != null ? closest(currentTemp, HEAT_INDEX_MATRIX_TEMPS) : null;
-  const highlightRh = currentRh != null ? closest(currentRh, HEAT_INDEX_MATRIX_RH) : null;
+function HeatIndexMatrix({ currentTemp, currentRh, exactHeatIndex }) {
+  // Inserts the actual current temperature and humidity as their own
+  // row/column (rounded to whole numbers) rather than snapping to the
+  // nearest standard chart increment — heat index is sensitive enough
+  // to small changes in either input that "nearest gridline" could
+  // show a visibly different number than the exact calculation used
+  // for the Heat Index figure above, which was confusing since they
+  // looked like they disagreed. This way the highlighted cell always
+  // shows the exact same number, not an approximation of it.
+  const highlightTemp = currentTemp != null ? Math.round(currentTemp) : null;
+  const highlightRh = currentRh != null ? Math.round(currentRh) : null;
+  const temps = Array.from(new Set([...HEAT_INDEX_MATRIX_TEMPS, ...(highlightTemp != null ? [highlightTemp] : [])])).sort((a, b) => a - b);
+  const rhs = Array.from(new Set([...HEAT_INDEX_MATRIX_RH, ...(highlightRh != null ? [highlightRh] : [])])).sort((a, b) => a - b);
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -1939,7 +1944,7 @@ function HeatIndexMatrix({ currentTemp, currentRh }) {
         <thead>
           <tr>
             <th style={{ padding: "4px 8px", textAlign: "right", color: COLORS.muted, fontWeight: 600 }}>Temp \ RH</th>
-            {HEAT_INDEX_MATRIX_RH.map(rh => (
+            {rhs.map(rh => (
               <th key={rh} style={{
                 padding: "4px 8px", textAlign: "center", color: COLORS.muted, fontWeight: 600,
                 background: rh === highlightRh ? COLORS.panel2 : "transparent",
@@ -1948,16 +1953,21 @@ function HeatIndexMatrix({ currentTemp, currentRh }) {
           </tr>
         </thead>
         <tbody>
-          {HEAT_INDEX_MATRIX_TEMPS.map(temp => (
+          {temps.map(temp => (
             <tr key={temp}>
               <td style={{
                 padding: "4px 8px", textAlign: "right", fontWeight: 600, color: COLORS.text,
                 background: temp === highlightTemp ? COLORS.panel2 : "transparent",
               }}>{temp}°F</td>
-              {HEAT_INDEX_MATRIX_RH.map(rh => {
-                const hi = calculateHeatIndex(temp, rh);
-                const cat = heatIndexCategory(hi);
+              {rhs.map(rh => {
                 const isHighlighted = temp === highlightTemp && rh === highlightRh;
+                // The highlighted cell reuses the exact already-computed
+                // Heat Index figure shown above rather than recalculating
+                // from rounded whole-number inputs — guarantees the two
+                // can never disagree, even by a single degree at a
+                // rounding boundary, rather than merely being very close.
+                const hi = isHighlighted && exactHeatIndex != null ? exactHeatIndex : calculateHeatIndex(temp, rh);
+                const cat = heatIndexCategory(hi);
                 return (
                   <td key={rh} style={{
                     padding: "4px 8px", textAlign: "center", background: cat.color, color: "#191C1F",
@@ -2297,7 +2307,7 @@ function TabWeather() {
                   <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>
                     NWS Heat Index Chart
                   </div>
-                  <HeatIndexMatrix currentTemp={temp} currentRh={rh} />
+                  <HeatIndexMatrix currentTemp={temp} currentRh={rh} exactHeatIndex={heatIndex} />
                 </div>
               )}
             </>
