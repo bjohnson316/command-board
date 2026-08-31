@@ -5754,9 +5754,9 @@ function AppInner({ onLock, theme, toggleTheme }) {
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
               <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
-              <Btn kind="ghost" icon={Settings} onClick={() => setShowAdminAuth(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Admin</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
+              <Btn kind="ghost" icon={Settings} onClick={() => setShowAdminAuth(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Admin</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
                 Synced
