@@ -432,7 +432,14 @@ function normalizeComms(raw) {
 function Field({ label, children, wide }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 5, gridColumn: wide ? "1 / -1" : undefined }}>
-      <span style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>{label}</span>
+      {/* minHeight reserves room for two lines regardless of whether
+          this particular label actually wraps — without it, a field
+          with a short one-line label sits with its input higher up
+          than a sibling field whose longer label wraps to two lines,
+          so inputs across the same row don't line up with each
+          other. display:block is required for minHeight to do
+          anything at all on a span, which is inline by default. */}
+      <span style={{ display: "block", minHeight: 28, lineHeight: "14px", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>{label}</span>
       {children}
     </label>
   );
