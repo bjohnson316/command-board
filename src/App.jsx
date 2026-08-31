@@ -1983,7 +1983,6 @@ function TabWeather() {
   // effect has something to depend on that changes at the right
   // moment.
   const [mapReady, setMapReady] = useState(false);
-  const [radarDebug, setRadarDebug] = useState(""); // on-screen diagnostic, since mobile Safari's console isn't easily reachable
   const radarTimerRef = useRef(null);
 
   const fetchCurrentConditions = (lat, lng) => {
@@ -2006,8 +2005,6 @@ function TabWeather() {
     fetch("https://api.rainviewer.com/public/weather-maps.json")
       .then(res => { if (!res.ok) throw new Error("bad response: " + res.status); return res.json(); })
       .then(data => {
-        console.log("[Weather] RainViewer metadata fetched OK. host:", data.host, "past frames:", (data.radar.past || []).length, "nowcast frames:", (data.radar.nowcast || []).length);
-        setRadarDebug(`Metadata OK: ${(data.radar.past || []).length} past + ${(data.radar.nowcast || []).length} nowcast frames from ${data.host}`);
         // Trimmed to the most recent frames rather than every one
         // RainViewer provides (which can be 13+ past frames alone) —
         // fewer total frames means fewer tile layers ever need
@@ -2020,11 +2017,7 @@ function TabWeather() {
         setRadarHost(data.host);
         setRadarIndex(Math.max(0, past.length - 1)); // start on the most recent actual (non-forecast) frame
       })
-      .catch((err) => {
-        console.error("[Weather] RainViewer metadata fetch failed:", err);
-        setRadarError("Couldn't load radar data. Check your connection and try Refresh.");
-        setRadarDebug(`Metadata fetch FAILED: ${err.message}`);
-      });
+      .catch(() => setRadarError("Couldn't load radar data. Check your connection and try Refresh."));
   };
 
   useEffect(() => {
@@ -2083,12 +2076,7 @@ function TabWeather() {
   // before, while still arriving at every frame being cached for
   // smooth animation once loading finishes.
   useEffect(() => {
-    if (!mapRef.current || !radarFrames.length || !radarHost) {
-      if (radarFrames.length && radarHost && !mapRef.current) {
-        setRadarDebug("Radar data ready, waiting for the map to finish mounting...");
-      }
-      return;
-    }
+    if (!mapRef.current || !radarFrames.length || !radarHost) return;
     let cancelled = false;
 
     // Guards against a real timing risk: if radar metadata finishes
@@ -2121,7 +2109,6 @@ function TabWeather() {
     // immediately, then backfills the rest afterward for animation.
     const activeIndex = radarIndexRef.current;
     const order = [activeIndex, ...radarFrames.map((_, i) => i).filter(i => i !== activeIndex)];
-    let loadedCount = 0;
 
     const loadNext = (pos) => {
       if (cancelled || pos >= order.length) return;
@@ -2147,18 +2134,7 @@ function TabWeather() {
       // zooming into a photo) at any zoom the map itself allows,
       // rather than the radar vanishing outright past that point.
       const layer = L.tileLayer(url, { opacity: index === radarIndexRef.current ? 0.75 : 0, maxNativeZoom: 7, maxZoom: 19, zIndex: 500 });
-      let tileErrors = 0;
-      // A snapshot overwritten on each update, not appended to — an
-      // earlier version of this kept appending forever, which is why
-      // it showed the same frame's count repeated many times over
-      // instead of a clean, current status.
-      layer.on("tileerror", () => {
-        tileErrors++;
-        setRadarDebug(`Loading frame ${loadedCount + 1}/${order.length}... (${tileErrors} tile error(s) on this frame)`);
-      });
       layer.once("load", () => {
-        loadedCount++;
-        setRadarDebug(`Loaded ${loadedCount}/${order.length} frames` + (tileErrors ? ` — last frame had ${tileErrors} tile error(s)` : ""));
         if (!cancelled) loadNext(pos + 1);
       });
       layer.addTo(mapRef.current);
@@ -2274,11 +2250,6 @@ function TabWeather() {
         {activeFrame && (
           <div style={{ fontSize: 11.5, color: COLORS.faint, marginTop: 6, fontFamily: "'IBM Plex Mono', monospace" }}>
             Frame: {new Date(activeFrame.time * 1000).toLocaleTimeString()}
-          </div>
-        )}
-        {radarDebug && (
-          <div style={{ fontSize: 10.5, color: COLORS.faint, marginTop: 4, fontFamily: "'IBM Plex Mono', monospace", wordBreak: "break-word" }}>
-            Debug: {radarDebug}
           </div>
         )}
       </Panel>
