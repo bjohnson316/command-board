@@ -2135,7 +2135,18 @@ function TabWeather() {
       // already set to this same value, so a layer created afterward
       // for the already-active frame would otherwise never become
       // visible until the user actually switched frames.
-      const layer = L.tileLayer(url, { opacity: index === radarIndexRef.current ? 0.75 : 0, maxZoom: 12, zIndex: 500 });
+      // maxNativeZoom (not maxZoom alone) is what actually matters
+      // here — RainViewer's own documentation states their radar
+      // tiles only exist up to zoom level 7. Setting maxZoom to a
+      // higher value without maxNativeZoom told Leaflet tiles existed
+      // all the way up to that level, so zooming in past 7 made it
+      // request tile coordinates RainViewer's server has never had —
+      // exactly the tile errors that appeared. maxNativeZoom stops
+      // Leaflet from ever requesting past zoom 7, while maxZoom keeps
+      // the layer visible (upscaling the zoom-7 tiles, same idea as
+      // zooming into a photo) at any zoom the map itself allows,
+      // rather than the radar vanishing outright past that point.
+      const layer = L.tileLayer(url, { opacity: index === radarIndexRef.current ? 0.75 : 0, maxNativeZoom: 7, maxZoom: 19, zIndex: 500 });
       let tileErrors = 0;
       // A snapshot overwritten on each update, not appended to — an
       // earlier version of this kept appending forever, which is why
