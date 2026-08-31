@@ -1966,7 +1966,7 @@ function TabWeather() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const gpsMarkerRef = useRef(null);
-  const radarLayersRef = useRef({}); // frame index -> L.TileLayer, kept loaded even when not the active frame
+  const radarLayersRef = useRef({}); // frame path -> L.TileLayer, kept loaded even when not the active frame
   const radarIndexRef = useRef(0); // mirrors radarIndex for use inside the async sequential-load callback below
   const [radarFrames, setRadarFrames] = useState([]); // [{ time, path }, ...] past + nowcast
   const [radarHost, setRadarHost] = useState("");
@@ -2076,10 +2076,6 @@ function TabWeather() {
     if (!mapRef.current || !radarFrames.length || !radarHost) return;
     let cancelled = false;
 
-    // The initially-active frame is the most recent PAST frame, which
-    // usually sits near the end of the array, not at index 0 — this
-    // ordering loads that frame first so something appears on screen
-    // immediately, then backfills the rest afterward for animation.
     // Guards against a real timing risk: if radar metadata finishes
     // fetching before the map has resolved its true on-screen size
     // (the fix for that runs on a short delay after map creation),
@@ -2087,16 +2083,37 @@ function TabWeather() {
     // whatever size it mistakenly still thinks it is.
     mapRef.current.invalidateSize();
 
+    // Cached by each frame's own path, not its array position. A
+    // frame's position shifts forward every refresh (RainViewer's
+    // whole "past" window moves in time), so "index 0" after a
+    // refresh is a genuinely different radar image than "index 0"
+    // before it — caching by position meant a refresh never actually
+    // replaced anything, leaving old tile layers (and their
+    // "tileerror" listeners) attached to the map indefinitely. Their
+    // image URLs eventually age out and start failing, which is
+    // exactly the runaway tile-error count that showed up on screen.
+    const currentPaths = new Set(radarFrames.map(f => f.path));
+    Object.keys(radarLayersRef.current).forEach(path => {
+      if (!currentPaths.has(path)) {
+        mapRef.current.removeLayer(radarLayersRef.current[path]);
+        delete radarLayersRef.current[path];
+      }
+    });
+
+    // The initially-active frame is the most recent PAST frame, which
+    // usually sits near the end of the array, not at index 0 — this
+    // ordering loads that frame first so something appears on screen
+    // immediately, then backfills the rest afterward for animation.
     const activeIndex = radarIndexRef.current;
     const order = [activeIndex, ...radarFrames.map((_, i) => i).filter(i => i !== activeIndex)];
+    let loadedCount = 0;
 
     const loadNext = (pos) => {
       if (cancelled || pos >= order.length) return;
       const index = order[pos];
-      if (radarLayersRef.current[index]) { loadNext(pos + 1); return; } // already cached from a previous run
       const frame = radarFrames[index];
+      if (radarLayersRef.current[frame.path]) { loadNext(pos + 1); return; } // already cached from a previous run
       const url = `${radarHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
-      console.log(`[Weather] Creating radar layer for frame ${index}, template: ${url}`);
       // Opacity set correctly right at creation, not left to the
       // separate toggle effect below — that effect only re-runs when
       // radarIndex itself changes, which won't happen again once it's
@@ -2104,30 +2121,24 @@ function TabWeather() {
       // for the already-active frame would otherwise never become
       // visible until the user actually switched frames.
       const layer = L.tileLayer(url, { opacity: index === radarIndexRef.current ? 0.75 : 0, maxZoom: 12, zIndex: 500 });
-      let tileErrorCount = 0;
-      layer.on("tileerror", (e) => {
-        tileErrorCount++;
-        console.error(`[Weather] Tile error on frame ${index} (${tileErrorCount} so far):`, e.tile && e.tile.src, e.error);
-        setRadarDebug(d => (`${d} | frame ${index}: ${tileErrorCount} tile error(s)`).slice(-500));
+      let tileErrors = 0;
+      // A snapshot overwritten on each update, not appended to — an
+      // earlier version of this kept appending forever, which is why
+      // it showed the same frame's count repeated many times over
+      // instead of a clean, current status.
+      layer.on("tileerror", () => {
+        tileErrors++;
+        setRadarDebug(`Loading frame ${loadedCount + 1}/${order.length}... (${tileErrors} tile error(s) on this frame)`);
       });
       layer.once("load", () => {
-        console.log(`[Weather] Frame ${index} finished loading (${tileErrorCount} tile errors).`);
-        setRadarDebug(d => (`${d} | frame ${index} loaded (${tileErrorCount} errors)`).slice(-500));
+        loadedCount++;
+        setRadarDebug(`Loaded ${loadedCount}/${order.length} frames` + (tileErrors ? ` — last frame had ${tileErrors} tile error(s)` : ""));
         if (!cancelled) loadNext(pos + 1);
       });
       layer.addTo(mapRef.current);
-      radarLayersRef.current[index] = layer;
+      radarLayersRef.current[frame.path] = layer;
     };
     loadNext(0);
-
-    // Drops any cached layers left over from a previous, differently-sized
-    // frame list (e.g. after a periodic refresh) so they don't linger.
-    Object.keys(radarLayersRef.current).forEach(key => {
-      if (Number(key) >= radarFrames.length) {
-        mapRef.current.removeLayer(radarLayersRef.current[key]);
-        delete radarLayersRef.current[key];
-      }
-    });
 
     return () => { cancelled = true; };
   }, [radarFrames, radarHost]);
@@ -2135,10 +2146,12 @@ function TabWeather() {
   // Instant — every frame's tiles are already loaded by the effect
   // above, so this never triggers a network request.
   useEffect(() => {
-    Object.entries(radarLayersRef.current).forEach(([i, layer]) => {
-      layer.setOpacity(Number(i) === radarIndex ? 0.75 : 0);
+    const activeFrame = radarFrames[radarIndex];
+    if (!activeFrame) return;
+    Object.entries(radarLayersRef.current).forEach(([path, layer]) => {
+      layer.setOpacity(path === activeFrame.path ? 0.75 : 0);
     });
-  }, [radarIndex]);
+  }, [radarIndex, radarFrames]);
 
   // Loops through the available frames for an animated "live" radar
   // view rather than just a single static snapshot.
