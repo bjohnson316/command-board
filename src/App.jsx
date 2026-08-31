@@ -1115,6 +1115,7 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // this app needs to work on iPads and phones, not just desktop mice.
   const [drag, setDrag] = useState(null); // { id, x, y, overStatus }
   const [showManageResources, setShowManageResources] = useState(false);
+  const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
@@ -1150,10 +1151,18 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Check In Resource" icon={Truck} right={
-        <Btn kind="subtle" icon={Settings} onClick={() => setShowManageResources(true)} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
+        <Btn kind="subtle" icon={Settings} onClick={() => setShowManageResourcesAuth(true)} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
       }>
         <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} />
       </Panel>
+      {showManageResourcesAuth && (
+        <PasswordConfirmModal
+          title="Admin Password Required"
+          message="Enter the admin password to manage departments, units, assignments, and resource types."
+          onConfirm={() => { setShowManageResourcesAuth(false); setShowManageResources(true); }}
+          onCancel={() => setShowManageResourcesAuth(false)}
+        />
+      )}
       {showManageResources && (
         <ManageResourcesModal
           departments={departments} onRenameDept={onRenameDepartment} onDeleteDept={onDeleteDepartment} onReorderDept={onReorderDepartment}
@@ -4870,7 +4879,7 @@ function ChangeArchivePasswordModal({ onClose }) {
     setError("");
     const cfg = await loadPinConfig();
     const currentHash = await sha256(current);
-    if (!cfg || currentHash !== cfg.archivePinHash) { setError("Incorrect current archive password."); return; }
+    if (!cfg || currentHash !== cfg.archivePinHash) { setError("Incorrect current admin password."); return; }
     if (next.length < 4) { setError("New password must be at least 4 characters."); return; }
     if (next !== confirm) { setError("New passwords don't match."); return; }
     setStatus("saving");
@@ -4885,17 +4894,17 @@ function ChangeArchivePasswordModal({ onClose }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change Archive Password</span>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change Admin Password</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         {status === "done" ? (
-          <div style={{ color: COLORS.teal, fontSize: 13, textAlign: "center", padding: "10px 0" }}>Archive password updated.</div>
+          <div style={{ color: COLORS.teal, fontSize: 13, textAlign: "center", padding: "10px 0" }}>Admin password updated.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Field label="Current Archive Password">
+            <Field label="Current Admin Password">
               <TextInput id="change-archive-pw-current" name="change-archive-pw-current" autoComplete="off" type="password" value={current} onChange={e => setCurrent(e.target.value)} />
             </Field>
-            <Field label="New Archive Password">
+            <Field label="New Admin Password">
               <TextInput id="change-archive-pw-new" name="change-archive-pw-new" autoComplete="off" type="password" value={next} onChange={e => setNext(e.target.value)} />
             </Field>
             <Field label="Confirm New Password">
@@ -4914,8 +4923,10 @@ function ChangeArchivePasswordModal({ onClose }) {
 }
 
 // Generic password gate for a destructive/protected action — checks
-// against the same archivePinHash used to view archived incidents,
-// rather than a separate credential. If no archive password has ever
+// against the same archivePinHash used to view archived incidents and
+// manage resources (now referred to as the "admin password" in the
+// UI, since it protects more than just the archive), rather than a
+// separate credential per feature. If no admin password has ever
 // been set, the action can't be confirmed (nothing to check against)
 // rather than silently allowing it through unprotected.
 function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
@@ -4940,7 +4951,7 @@ function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
     if (cfg && cfg.archivePinHash && hash === cfg.archivePinHash) {
       onConfirm();
     } else {
-      setError("Incorrect archive password.");
+      setError("Incorrect admin password.");
       setPin("");
     }
   };
@@ -4955,13 +4966,13 @@ function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
         {phase === "loading" && <div style={{ color: COLORS.muted, fontSize: 13 }}>Loading…</div>}
         {phase === "notSet" && (
           <div style={{ fontSize: 12.5, color: COLORS.muted, lineHeight: 1.5 }}>
-            No archive password has been set yet, so this action can't be confirmed. Set one first from "View Archived Incidents" in the library.
+            No admin password has been set yet, so this action can't be confirmed. Set one first from "View Archived Incidents" in the library.
           </div>
         )}
         {phase === "prompt" && (
           <>
             <p style={{ fontSize: 12.5, color: COLORS.muted, marginTop: 0, lineHeight: 1.5 }}>{message}</p>
-            <TextInput id="archive-unlock-pw" name="archive-unlock-pw" autoComplete="off" type="password" autoFocus placeholder="Archive password" value={pin} onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
+            <TextInput id="archive-unlock-pw" name="archive-unlock-pw" autoComplete="off" type="password" autoFocus placeholder="Admin password" value={pin} onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
               onKeyDown={e => e.key === "Enter" && submit()} />
             <Btn kind="solid" onClick={submit} disabled={checking} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>
               {checking ? "Checking…" : "Confirm"}
@@ -5028,10 +5039,10 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
           title={confirmAction.type === "archive" ? "Confirm Archive" : confirmAction.type === "delete" ? "Confirm Delete" : "Confirm New Incident"}
           message={
             confirmAction.type === "archive"
-              ? `Enter the archive password to archive "${confirmAction.name || "Unnamed Incident"}".`
+              ? `Enter the admin password to archive "${confirmAction.name || "Unnamed Incident"}".`
               : confirmAction.type === "delete"
-                ? `Enter the archive password to permanently delete "${confirmAction.name || "Unnamed Incident"}". This can't be undone.`
-                : "Enter the archive password to start a new incident."
+                ? `Enter the admin password to permanently delete "${confirmAction.name || "Unnamed Incident"}". This can't be undone.`
+                : "Enter the admin password to start a new incident."
           }
           onConfirm={() => {
             if (confirmAction.type === "archive") onArchive(confirmAction.id);
@@ -5105,10 +5116,10 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
             <>
               <p style={{ fontSize: 12.5, color: COLORS.muted, lineHeight: 1.5, marginTop: 0 }}>
                 {phase === "setup"
-                  ? "No archive password is set yet. Choose one now — this is separate from the board's main PIN, and is only needed to view or export incidents that have been closed out."
-                  : "Enter the archive password to view closed-out incidents."}
+                  ? "No admin password is set yet. Choose one now — this is separate from the board's main PIN, and is only needed to view or export incidents that have been closed out."
+                  : "Enter the admin password to view closed-out incidents."}
               </p>
-              <TextInput id="archive-pw-primary" name="archive-pw-primary" autoComplete="off" type="password" autoFocus placeholder={phase === "setup" ? "New archive password" : "Archive password"} value={pin}
+              <TextInput id="archive-pw-primary" name="archive-pw-primary" autoComplete="off" type="password" autoFocus placeholder={phase === "setup" ? "New admin password" : "Admin password"} value={pin}
                 onChange={e => setPin(e.target.value)} style={{ width: "100%" }}
                 onKeyDown={e => e.key === "Enter" && phase === "locked" && doUnlock()} />
               {phase === "setup" && (
@@ -5142,7 +5153,7 @@ function ArchiveModal({ index, onClose, onExport, onRestore, onChangePassword })
               </div>
               <div style={{ borderTop: `1px solid ${COLORS.line}`, marginTop: 14, paddingTop: 12 }}>
                 <Btn kind="ghost" onClick={onChangePassword} style={{ width: "100%", justifyContent: "center", fontSize: 12 }}>
-                  Change Archive Password
+                  Change Admin Password
                 </Btn>
               </div>
             </>
