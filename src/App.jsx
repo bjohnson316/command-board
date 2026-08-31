@@ -1863,6 +1863,99 @@ const WMO_WEATHER_DESCRIPTIONS = {
 };
 const weatherCodeDescription = (code) => WMO_WEATHER_DESCRIPTIONS[code] || "Unknown";
 
+// NWS Rothfusz regression — the standard heat index formula used by
+// the National Weather Service, verified against both a documented
+// worked example (96°F/65% RH -> ~121°F) and the published NWS heat
+// index chart before use here, given how directly this figure feeds
+// into rehab/heat-illness decisions. Below 80°F heat index isn't a
+// standard/meaningful concept (no heat-stress concern at that point),
+// so callers should only display it above that threshold.
+function calculateHeatIndex(tempF, rh) {
+  let hi = 0.5 * (tempF + 61.0 + ((tempF - 68.0) * 1.2) + (rh * 0.094));
+  if ((hi + tempF) / 2 < 80) return hi;
+
+  hi = -42.379 + 2.04901523 * tempF + 10.14333127 * rh - 0.22475541 * tempF * rh
+    - 0.00683783 * tempF * tempF - 0.05481717 * rh * rh + 0.00122874 * tempF * tempF * rh
+    + 0.00085282 * tempF * rh * rh - 0.00000199 * tempF * tempF * rh * rh;
+
+  if (rh < 13 && tempF >= 80 && tempF <= 112) {
+    hi -= ((13 - rh) / 4) * Math.sqrt((17 - Math.abs(tempF - 95)) / 17);
+  } else if (rh > 85 && tempF >= 80 && tempF <= 87) {
+    hi += ((rh - 85) / 10) * ((87 - tempF) / 5);
+  }
+  return hi;
+}
+
+// NWS's four official heat-index danger categories and their chart colors.
+function heatIndexCategory(hi) {
+  if (hi >= 125) return { label: "Extreme Danger", color: "#7A1F1F" };
+  if (hi >= 103) return { label: "Danger", color: "#C4341F" };
+  if (hi >= 90) return { label: "Extreme Caution", color: "#D9A02B" };
+  return { label: "Caution", color: "#E8D26B" };
+}
+
+const HEAT_INDEX_MATRIX_TEMPS = [80, 85, 90, 95, 100, 105, 110];
+const HEAT_INDEX_MATRIX_RH = [40, 50, 60, 70, 80, 90, 100];
+
+function HeatIndexMatrix({ currentTemp, currentRh }) {
+  // Snaps the actual current reading to the nearest chart cell so it
+  // can be highlighted — purely a visual reference aid, not used in
+  // the displayed heat index number itself (that's the exact
+  // calculation, not a chart lookup).
+  const closest = (value, options) => options.reduce((a, b) => Math.abs(b - value) < Math.abs(a - value) ? b : a);
+  const highlightTemp = currentTemp != null ? closest(currentTemp, HEAT_INDEX_MATRIX_TEMPS) : null;
+  const highlightRh = currentRh != null ? closest(currentRh, HEAT_INDEX_MATRIX_RH) : null;
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ padding: "4px 8px", textAlign: "right", color: COLORS.muted, fontWeight: 600 }}>Temp \ RH</th>
+            {HEAT_INDEX_MATRIX_RH.map(rh => (
+              <th key={rh} style={{
+                padding: "4px 8px", textAlign: "center", color: COLORS.muted, fontWeight: 600,
+                background: rh === highlightRh ? COLORS.panel2 : "transparent",
+              }}>{rh}%</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {HEAT_INDEX_MATRIX_TEMPS.map(temp => (
+            <tr key={temp}>
+              <td style={{
+                padding: "4px 8px", textAlign: "right", fontWeight: 600, color: COLORS.text,
+                background: temp === highlightTemp ? COLORS.panel2 : "transparent",
+              }}>{temp}°F</td>
+              {HEAT_INDEX_MATRIX_RH.map(rh => {
+                const hi = calculateHeatIndex(temp, rh);
+                const cat = heatIndexCategory(hi);
+                const isHighlighted = temp === highlightTemp && rh === highlightRh;
+                return (
+                  <td key={rh} style={{
+                    padding: "4px 8px", textAlign: "center", background: cat.color, color: "#191C1F",
+                    fontWeight: isHighlighted ? 800 : 400,
+                    outline: isHighlighted ? `2px solid ${COLORS.text}` : "none",
+                    outlineOffset: -2,
+                  }}>{Math.round(hi)}</td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8, fontSize: 11 }}>
+        {[{ label: "Caution", color: "#E8D26B" }, { label: "Extreme Caution", color: "#D9A02B" }, { label: "Danger", color: "#C4341F" }, { label: "Extreme Danger", color: "#7A1F1F" }].map(c => (
+          <div key={c.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 12, height: 12, background: c.color, display: "inline-block", borderRadius: 2 }} />
+            <span style={{ color: COLORS.muted }}>{c.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TabWeather() {
   const [coords, setCoords] = useState(null); // { lat, lng }
   const [locError, setLocError] = useState("");
@@ -1981,27 +2074,58 @@ function TabWeather() {
         {locError && <div style={{ fontSize: 13, color: COLORS.dangerText }}>{locError}</div>}
         {!locError && currentLoading && <div style={{ fontSize: 13, color: COLORS.faint }}>Getting your location and current conditions...</div>}
         {currentError && <div style={{ fontSize: 13, color: COLORS.dangerText }}>{currentError}</div>}
-        {current && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 14 }}>
-            <div>
-              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Temp</div>
-              <div style={{ fontSize: 26, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.temperature_2m)}°F</div>
-              <div style={{ fontSize: 11.5, color: COLORS.faint }}>Feels like {Math.round(current.apparent_temperature)}°F</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Wind</div>
-              <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.wind_speed_10m)} mph {degreesToCompass(current.wind_direction_10m)}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Humidity</div>
-              <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.relative_humidity_2m)}%</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conditions</div>
-              <div style={{ fontSize: 16, marginTop: 4 }}>{weatherCodeDescription(current.weather_code)}</div>
-            </div>
-          </div>
-        )}
+        {current && (() => {
+          const temp = current.temperature_2m, rh = current.relative_humidity_2m, feelsLike = current.apparent_temperature;
+          // Heat index only exists as a standard, meaningful concept
+          // at 80°F and above — below that there's no heat-stress
+          // concern and the figure doesn't mean much.
+          const showHeatIndex = temp >= 80;
+          const heatIndex = showHeatIndex ? calculateHeatIndex(temp, rh) : null;
+          // Open-Meteo's own "feels like" already blends in heat
+          // index-like effects for hot conditions — if the two are
+          // within a couple degrees of each other, showing a
+          // separate Heat Index number would just be repeating the
+          // same figure twice under different names.
+          const heatIndexDiffersFromFeelsLike = heatIndex != null && Math.abs(heatIndex - feelsLike) >= 2;
+          return (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 14 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Temp</div>
+                  <div style={{ fontSize: 26, fontFamily: "'Oswald', sans-serif" }}>{Math.round(temp)}°F</div>
+                  <div style={{ fontSize: 11.5, color: COLORS.faint }}>Feels like {Math.round(feelsLike)}°F</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Wind</div>
+                  <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(current.wind_speed_10m)} mph {degreesToCompass(current.wind_direction_10m)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Humidity</div>
+                  <div style={{ fontSize: 20, fontFamily: "'Oswald', sans-serif" }}>{Math.round(rh)}%</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Conditions</div>
+                  <div style={{ fontSize: 16, marginTop: 4 }}>{weatherCodeDescription(current.weather_code)}</div>
+                </div>
+                {heatIndexDiffersFromFeelsLike && (
+                  <div>
+                    <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Heat Index</div>
+                    <div style={{ fontSize: 26, fontFamily: "'Oswald', sans-serif", color: heatIndexCategory(heatIndex).color }}>{Math.round(heatIndex)}°F</div>
+                    <div style={{ fontSize: 11.5, color: COLORS.faint }}>{heatIndexCategory(heatIndex).label}</div>
+                  </div>
+                )}
+              </div>
+              {showHeatIndex && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>
+                    NWS Heat Index Chart
+                  </div>
+                  <HeatIndexMatrix currentTemp={temp} currentRh={rh} />
+                </div>
+              )}
+            </>
+          );
+        })()}
       </Panel>
 
       <Panel title="Live Radar" icon={CloudSun} right={
