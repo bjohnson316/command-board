@@ -1956,8 +1956,26 @@ function HeatIndexMatrix({ currentTemp, currentRh }) {
   );
 }
 
+// Nominatim only returns a state's full name (e.g. "Texas"), never an
+// abbreviation, so this converts it for the more compact "City, ST"
+// display convention most weather displays use.
+const US_STATE_ABBREVIATIONS = {
+  "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+  "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA",
+  "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA",
+  "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
+  "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO",
+  "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ",
+  "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH",
+  "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
+  "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT",
+  "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
+  "District of Columbia": "DC",
+};
+
 function TabWeather() {
   const [coords, setCoords] = useState(null); // { lat, lng }
+  const [locationName, setLocationName] = useState(""); // e.g. "Denton, TX", from reverse geocoding
   const [locError, setLocError] = useState("");
   const [current, setCurrent] = useState(null);
   const [currentLoading, setCurrentLoading] = useState(false);
@@ -1997,6 +2015,25 @@ function TabWeather() {
       .catch(() => { setCurrentError("Couldn't load current conditions. Check your connection and try Refresh."); setCurrentLoading(false); });
   };
 
+  const fetchLocationName = (lat, lng) => {
+    // Nominatim (OpenStreetMap's own geocoder) — free, no API key or
+    // account required, matching the tile source already used for
+    // the base map. Their usage policy requires a way to identify the
+    // requesting application via either a custom User-Agent (which
+    // browser JS isn't allowed to set) or a valid Referer header,
+    // which browsers already send automatically on a request like
+    // this from a real deployed page.
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`)
+      .then(res => { if (!res.ok) throw new Error("bad response"); return res.json(); })
+      .then(data => {
+        const a = data.address || {};
+        const place = a.city || a.town || a.village || a.hamlet || a.county;
+        const state = a.state ? (US_STATE_ABBREVIATIONS[a.state] || a.state) : "";
+        setLocationName([place, state].filter(Boolean).join(", "));
+      })
+      .catch(() => setLocationName("")); // silently omit rather than showing an error for a non-essential label
+  };
+
   const fetchRadarFrames = () => {
     setRadarError("");
     // RainViewer — free, no API key or account required, for
@@ -2027,6 +2064,7 @@ function TabWeather() {
         const { latitude, longitude } = pos.coords;
         setCoords({ lat: latitude, lng: longitude });
         fetchCurrentConditions(latitude, longitude);
+        fetchLocationName(latitude, longitude);
       },
       (err) => setLocError(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
       { enableHighAccuracy: false, maximumAge: 300000 }
@@ -2166,7 +2204,10 @@ function TabWeather() {
   }, [radarPlaying, radarFrames.length]);
 
   const refreshAll = () => {
-    if (coords) fetchCurrentConditions(coords.lat, coords.lng);
+    if (coords) {
+      fetchCurrentConditions(coords.lat, coords.lng);
+      fetchLocationName(coords.lat, coords.lng);
+    }
     fetchRadarFrames();
   };
 
@@ -2175,7 +2216,10 @@ function TabWeather() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Current Weather" icon={CloudSun} right={
-        <Btn kind="subtle" icon={RefreshCw} onClick={refreshAll} style={{ padding: "6px 11px", fontSize: 12.5 }}>Refresh</Btn>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {locationName && <span style={{ fontSize: 13, color: COLORS.muted }}>{locationName}</span>}
+          <Btn kind="subtle" icon={RefreshCw} onClick={refreshAll} style={{ padding: "6px 11px", fontSize: 12.5 }}>Refresh</Btn>
+        </div>
       }>
         {locError && <div style={{ fontSize: 13, color: COLORS.dangerText }}>{locError}</div>}
         {!locError && currentLoading && <div style={{ fontSize: 13, color: COLORS.faint }}>Getting your location and current conditions...</div>}
