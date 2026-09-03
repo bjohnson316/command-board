@@ -1123,15 +1123,13 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind }) {
+function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
   // drag-and-drop, because HTML5 DnD is unreliable on touch devices —
   // this app needs to work on iPads and phones, not just desktop mice.
   const [drag, setDrag] = useState(null); // { id, x, y, overStatus }
-  const [showManageResources, setShowManageResources] = useState(false);
-  const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
@@ -1167,30 +1165,10 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Check In Resource" icon={Truck} right={
-        <Btn kind="subtle" icon={Settings} onClick={() => setShowManageResourcesAuth(true)} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
+        <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
       }>
         <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} />
       </Panel>
-      {showManageResourcesAuth && (
-        <PasswordConfirmModal
-          title="Admin Password Required"
-          message="Enter the admin password to manage departments, units, assignments, and resource types."
-          onConfirm={() => { setShowManageResourcesAuth(false); setShowManageResources(true); }}
-          onCancel={() => setShowManageResourcesAuth(false)}
-        />
-      )}
-      {showManageResources && (
-        <ManageResourcesModal
-          departments={departments} onRenameDept={onRenameDepartment} onDeleteDept={onDeleteDepartment} onReorderDept={onReorderDepartment}
-          onRenameUnit={onRenameUnit} onDeleteUnit={onDeleteUnit} onMoveUnit={onMoveUnit} onReorderUnit={onReorderUnit}
-          onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment}
-          assignments={assignmentPresets} onRenameAssignment={onRenameAssignment} onDeleteAssignment={onDeleteAssignment}
-          onReorderAssignment={onReorderAssignment} onAddAssignment={onSaveAssignmentPreset}
-          resourceKinds={resourceKindPresets} onRenameKind={onRenameResourceKind} onDeleteKind={onDeleteResourceKind}
-          onReorderKind={onReorderResourceKind} onAddKind={onAddResourceKind}
-          onClose={() => setShowManageResources(false)}
-        />
-      )}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
           const items = resources.filter(r => r.status === status);
@@ -4867,7 +4845,7 @@ function ManageIncidentTypesModal({ onClose, incidentTypes, onAdd, onRename, onD
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -4879,6 +4857,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
           <Btn kind="ghost" icon={KeyRound} onClick={onChangePin} style={{ width: "100%", justifyContent: "center" }}>Change PIN</Btn>
           <Btn kind="ghost" icon={Lock} onClick={onChangeAdminPassword} style={{ width: "100%", justifyContent: "center" }}>Change Admin Password</Btn>
           <Btn kind="ghost" icon={ClipboardList} onClick={onManageIncidentTypes} style={{ width: "100%", justifyContent: "center" }}>Manage Incident Types</Btn>
+          <Btn kind="ghost" icon={Settings} onClick={onManageResources} style={{ width: "100%", justifyContent: "center" }}>Manage Resources</Btn>
         </div>
       </div>
     </div>
@@ -5358,6 +5337,13 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [showAdminAuth, setShowAdminAuth] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showManageIncidentTypes, setShowManageIncidentTypes] = useState(false);
+  // Lifted up from TabResources (rather than local state there) since
+  // this now also needs to be reachable from the Admin menu, which is
+  // available from any tab — local state inside TabResources would
+  // only ever take effect while that specific tab happened to be the
+  // one currently mounted.
+  const [showManageResources, setShowManageResources] = useState(false);
+  const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
   const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [] });
@@ -5878,6 +5864,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 onRenameAssignment={renameAssignmentPreset} onDeleteAssignment={deleteAssignmentPreset} onReorderAssignment={reorderAssignmentPresets}
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
+                onOpenManageResources={() => setShowManageResourcesAuth(true)}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "weather" && <TabWeather />}
@@ -5932,6 +5919,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onChangePin={() => { setShowAdminMenu(false); setShowChangePin(true); }}
           onChangeAdminPassword={() => { setShowAdminMenu(false); setShowChangeArchivePassword(true); }}
           onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
+          onManageResources={() => { setShowAdminMenu(false); setShowManageResources(true); }}
         />
       )}
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
@@ -5943,6 +5931,26 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onRename={renameIncidentType}
           onDelete={deleteIncidentType}
           onReorder={reorderIncidentTypes}
+        />
+      )}
+      {showManageResourcesAuth && (
+        <PasswordConfirmModal
+          title="Admin Password Required"
+          message="Enter the admin password to manage departments, units, assignments, and resource types."
+          onConfirm={() => { setShowManageResourcesAuth(false); setShowManageResources(true); }}
+          onCancel={() => setShowManageResourcesAuth(false)}
+        />
+      )}
+      {showManageResources && (
+        <ManageResourcesModal
+          departments={presets.departments} onRenameDept={renameDepartment} onDeleteDept={deleteDepartment} onReorderDept={reorderDepartments}
+          onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnits}
+          onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
+          assignments={presets.assignments} onRenameAssignment={renameAssignmentPreset} onDeleteAssignment={deleteAssignmentPreset}
+          onReorderAssignment={reorderAssignmentPresets} onAddAssignment={saveAssignmentPreset}
+          resourceKinds={presets.resourceKinds} onRenameKind={renameResourceKind} onDeleteKind={deleteResourceKind}
+          onReorderKind={reorderResourceKinds} onAddKind={addResourceKind}
+          onClose={() => setShowManageResources(false)}
         />
       )}
 
