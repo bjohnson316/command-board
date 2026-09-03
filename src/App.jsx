@@ -536,7 +536,7 @@ function Panel({ title, icon: Icon, right, children, style }) {
 /* ============================================================
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
-function Tab201({ incident, setIncident, resources, objectivePresets, onSavePreset, incidentTypePresets }) {
+function Tab201({ incident, setIncident, resources, incidentTypePresets, objectivesByType, onAddObjective }) {
   const [weatherStatus, setWeatherStatus] = useState(""); // "", "loading", or an error message
   const fetchCurrentWeather = () => {
     if (!navigator.geolocation) { setWeatherStatus("This device/browser doesn't support GPS location."); return; }
@@ -574,6 +574,26 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
   };
   const addObjective = () => setIncident({ ...incident, objectives: [...incident.objectives, ""] });
   const removeObjective = (i) => setIncident({ ...incident, objectives: incident.objectives.filter((_, idx) => idx !== i) });
+  // Objectives specific to the currently-selected incident type, plus
+  // General ones that make sense no matter the type — General isn't
+  // an incident type of its own, just a catch-all category managed
+  // the same way from the Admin panel.
+  const relevantObjectives = [...(objectivesByType.General || []), ...(objectivesByType[incident.type] || [])];
+  // Quick-add fills the first blank row left over from "Add
+  // Objective" if one exists, rather than always appending a new one
+  // underneath it — clicking a suggestion right after adding a blank
+  // row is the common case, and this avoids leaving that blank row
+  // orphaned above the newly-added text.
+  const addObjectiveFromPreset = (text) => {
+    if (incident.objectives.includes(text)) return;
+    const emptyIdx = incident.objectives.findIndex(o => !o.trim());
+    if (emptyIdx !== -1) {
+      const next = [...incident.objectives]; next[emptyIdx] = text;
+      setIncident({ ...incident, objectives: next });
+    } else {
+      setIncident({ ...incident, objectives: [...incident.objectives, text] });
+    }
+  };
 
   const addAction = () => setIncident({ ...incident, actionsLog: [...incident.actionsLog, { id: uid(), time: "", actions: "" }] });
   const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
@@ -637,15 +657,25 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
 
         <div style={{ marginTop: 16 }}>
           <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>Current and Planned Objectives</div>
+          {relevantObjectives.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {relevantObjectives.filter(o => !incident.objectives.includes(o)).map(o => (
+                <button key={o} onClick={() => addObjectiveFromPreset(o)}
+                  style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 12, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.text, cursor: "pointer" }}>
+                  + {o}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {incident.objectives.map((o, i) => {
-              const isNewObjective = o.trim() && !objectivePresets.includes(o.trim());
+              const isNewObjective = o.trim() && !relevantObjectives.includes(o.trim());
               return (
                 <div key={i} style={{ display: "flex", gap: 8 }}>
                   <span style={{ width: 22, textAlign: "right", color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, paddingTop: 9 }}>{i + 1}.</span>
                   <TextInput list="objective-presets" value={o} onChange={e => updateObjective(i, e.target.value)} style={{ flex: 1 }} placeholder="Objective..." />
                   {isNewObjective && (
-                    <button onClick={() => onSavePreset(o.trim())} title="Save as a quick-pick objective for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
+                    <button onClick={() => onAddObjective(incident.type, o.trim())} title={`Save as a quick-pick objective for ${incident.type || "this type"}`} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
                       <Star size={14} />
                     </button>
                   )}
@@ -653,7 +683,7 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
                 </div>
               );
             })}
-            <datalist id="objective-presets">{objectivePresets.map(p => <option key={p} value={p} />)}</datalist>
+            <datalist id="objective-presets">{relevantObjectives.map(p => <option key={p} value={p} />)}</datalist>
             <Btn kind="subtle" icon={Plus} onClick={addObjective} style={{ alignSelf: "flex-start" }}>Add Objective</Btn>
           </div>
         </div>
@@ -3243,13 +3273,24 @@ function Tab206({ ics206, setIcs206, incident }) {
 // read/write the same underlying incident fields, so filling in one
 // updates the other. This is the one that includes the Resource
 // Summary table (Block 10), matching the official form exactly.
-function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset }) {
+function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjective }) {
   const updateObjective = (i, val) => {
     const next = [...incident.objectives]; next[i] = val;
     setIncident({ ...incident, objectives: next });
   };
   const addObjective = () => setIncident({ ...incident, objectives: [...incident.objectives, ""] });
   const removeObjective = (i) => setIncident({ ...incident, objectives: incident.objectives.filter((_, idx) => idx !== i) });
+  const relevantObjectives = [...(objectivesByType.General || []), ...(objectivesByType[incident.type] || [])];
+  const addObjectiveFromPreset = (text) => {
+    if (incident.objectives.includes(text)) return;
+    const emptyIdx = incident.objectives.findIndex(o => !o.trim());
+    if (emptyIdx !== -1) {
+      const next = [...incident.objectives]; next[emptyIdx] = text;
+      setIncident({ ...incident, objectives: next });
+    } else {
+      setIncident({ ...incident, objectives: [...incident.objectives, text] });
+    }
+  };
 
   const addAction = () => setIncident({ ...incident, actionsLog: [...incident.actionsLog, { id: uid(), time: "", actions: "" }] });
   const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
@@ -3293,15 +3334,25 @@ function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset
       </Panel>
 
       <Panel title="7. Current and Planned Objectives" icon={ClipboardList}>
+        {relevantObjectives.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {relevantObjectives.filter(o => !incident.objectives.includes(o)).map(o => (
+              <button key={o} onClick={() => addObjectiveFromPreset(o)}
+                style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 12, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.text, cursor: "pointer" }}>
+                + {o}
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {incident.objectives.map((o, i) => {
-            const isNewObjective = o.trim() && !objectivePresets.includes(o.trim());
+            const isNewObjective = o.trim() && !relevantObjectives.includes(o.trim());
             return (
               <div key={i} style={{ display: "flex", gap: 8 }}>
                 <span style={{ width: 22, textAlign: "right", color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, paddingTop: 9 }}>{i + 1}.</span>
                 <TextInput list="objective-presets" value={o} onChange={e => updateObjective(i, e.target.value)} style={{ flex: 1 }} placeholder="Objective..." />
                 {isNewObjective && (
-                  <button onClick={() => onSavePreset(o.trim())} title="Save as a quick-pick objective for next time" style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
+                  <button onClick={() => onAddObjective(incident.type, o.trim())} title={`Save as a quick-pick objective for ${incident.type || "this type"}`} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 4, color: COLORS.amber, cursor: "pointer", padding: "0 8px" }}>
                     <Star size={14} />
                   </button>
                 )}
@@ -3309,7 +3360,7 @@ function Tab201Full({ incident, setIncident, org, objectivePresets, onSavePreset
               </div>
             );
           })}
-          <datalist id="objective-presets">{objectivePresets.map(p => <option key={p} value={p} />)}</datalist>
+          <datalist id="objective-presets">{relevantObjectives.map(p => <option key={p} value={p} />)}</datalist>
           <Btn kind="subtle" icon={Plus} onClick={addObjective} style={{ alignSelf: "flex-start" }}>Add Objective</Btn>
         </div>
       </Panel>
@@ -3402,7 +3453,7 @@ function TabICSForms(props) {
         </div>
       </Panel>
 
-      {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivePresets={props.objectivePresets} onSavePreset={props.onSavePreset} />}
+      {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivesByType={props.objectivesByType} onAddObjective={props.onAddObjective} />}
       {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} incident={props.incident} />}
       {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
       {selected === "208" && <Tab208 ics208={props.ics208} setIcs208={props.setIcs208} incident={props.incident} />}
@@ -4825,6 +4876,47 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
 // rename-inline, delete component already used for Resource Types
 // under Manage Resources, so this behaves identically rather than
 // introducing a second, slightly-different list-editing pattern.
+// Objectives are grouped by incident type (plus a catch-all "General"
+// category for anything relevant regardless of type) rather than one
+// flat list — this lets the picker on the Tactical Worksheet only
+// surface what's actually relevant once an incident type is chosen.
+// Reuses FlatListManager for the actual list editing, same as the
+// other two preset-management modals, just with a category picker on
+// top to choose which type's list is currently being edited.
+function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd, onRename, onDelete, onReorder }) {
+  const categories = ["General", ...incidentTypes];
+  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
+  const list = objectivesByType[selectedCategory] || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 400, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Objectives</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          Objectives are grouped by incident type — pick a category below to edit its list. General objectives show up as suggestions no matter which incident type is selected on the Tactical Worksheet.
+        </div>
+        <Field label="Category">
+          <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </Field>
+        <div style={{ marginTop: 14 }}>
+          <FlatListManager
+            items={list}
+            onAdd={(name) => onAdd(selectedCategory, name)}
+            onRename={(oldName, newName) => onRename(selectedCategory, oldName, newName)}
+            onDelete={(name) => onDelete(selectedCategory, name)}
+            onReorder={(newList) => onReorder(selectedCategory, newList)}
+            addLabel="Add Objective" addPlaceholder="New objective" emptyLabel="None yet."
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ManageIncidentTypesModal({ onClose, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
@@ -4851,7 +4943,7 @@ function ManageIncidentTypesModal({ onClose, incidentTypes, onAdd, onRename, onD
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -4864,6 +4956,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
           <Btn kind="ghost" icon={Lock} onClick={onChangeAdminPassword} style={{ width: "100%", justifyContent: "center" }}>Change Admin Password</Btn>
           <Btn kind="ghost" icon={ClipboardList} onClick={onManageIncidentTypes} style={{ width: "100%", justifyContent: "center" }}>Manage Incident Types</Btn>
           <Btn kind="ghost" icon={Settings} onClick={onManageResources} style={{ width: "100%", justifyContent: "center" }}>Manage Resources</Btn>
+          <Btn kind="ghost" icon={Star} onClick={onManageObjectives} style={{ width: "100%", justifyContent: "center" }}>Manage Objectives</Btn>
         </div>
       </div>
     </div>
@@ -5350,6 +5443,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // only ever take effect while that specific tab happened to be the
   // one currently mounted.
   const [showManageResources, setShowManageResources] = useState(false);
+  const [showManageObjectives, setShowManageObjectives] = useState(false);
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
@@ -5417,7 +5511,13 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // incidentTypeColor) so a custom/added type still gets one
       // without needing a color-picker UI of its own.
       const incidentTypes = p.incidentTypes && p.incidentTypes.length > 0 ? p.incidentTypes : INCIDENT_TYPES.map(t => t.v);
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes });
+      // Objectives used to be one flat list shared across every
+      // incident regardless of type — migrated into a "General"
+      // category here (rather than discarded) so anything already
+      // saved keeps showing up as a suggestion, just alongside the
+      // new per-type categories instead of being the only list.
+      const objectivesByType = p.objectivesByType || (p.objectives && p.objectives.length > 0 ? { General: p.objectives } : {});
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -5625,11 +5725,31 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setPresets(next);
     savePresets(next);
   };
-  const saveObjectivePreset = async (objective) => {
-    if (!objective || presets.objectives.includes(objective)) return;
-    const next = { ...presets, objectives: [...presets.objectives, objective] };
+  const addObjectiveForType = (type, objective) => {
+    const trimmed = objective.trim();
+    if (!trimmed) return;
+    const current = presets.objectivesByType[type] || [];
+    if (current.includes(trimmed)) return;
+    const next = { ...presets, objectivesByType: { ...presets.objectivesByType, [type]: [...current, trimmed] } };
     setPresets(next);
-    await savePresets(next);
+    savePresets(next);
+  };
+  const renameObjectiveForType = (type, oldName, newName) => {
+    const current = presets.objectivesByType[type] || [];
+    const next = { ...presets, objectivesByType: { ...presets.objectivesByType, [type]: current.map(o => o === oldName ? newName : o) } };
+    setPresets(next);
+    savePresets(next);
+  };
+  const deleteObjectiveForType = (type, objective) => {
+    const current = presets.objectivesByType[type] || [];
+    const next = { ...presets, objectivesByType: { ...presets.objectivesByType, [type]: current.filter(o => o !== objective) } };
+    setPresets(next);
+    savePresets(next);
+  };
+  const reorderObjectivesForType = (type, newList) => {
+    const next = { ...presets, objectivesByType: { ...presets.objectivesByType, [type]: newList } };
+    setPresets(next);
+    savePresets(next);
   };
   const saveAssignmentPreset = async (assignment) => {
     if (!assignment || presets.assignments.includes(assignment)) return;
@@ -5862,7 +5982,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
             <>
-              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} incidentTypePresets={presets.incidentTypes} />}
+              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
@@ -5888,7 +6008,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                   ics206={ics206} setIcs206={setIcs206}
                   logs={logs} setLogs={setLogs}
                   mapData={mapData}
-                  objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset}
+                  objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType}
                   formsUsed={formsUsed} toggleFormUsed={toggleFormUsed}
                 />
               )}
@@ -5927,6 +6047,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onChangeAdminPassword={() => { setShowAdminMenu(false); setShowChangeArchivePassword(true); }}
           onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
           onManageResources={() => { setShowAdminMenu(false); setShowManageResources(true); }}
+          onManageObjectives={() => { setShowAdminMenu(false); setShowManageObjectives(true); }}
         />
       )}
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
@@ -5938,6 +6059,17 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onRename={renameIncidentType}
           onDelete={deleteIncidentType}
           onReorder={reorderIncidentTypes}
+        />
+      )}
+      {showManageObjectives && (
+        <ManageObjectivesModal
+          onClose={() => setShowManageObjectives(false)}
+          incidentTypes={presets.incidentTypes}
+          objectivesByType={presets.objectivesByType}
+          onAdd={addObjectiveForType}
+          onRename={renameObjectiveForType}
+          onDelete={deleteObjectiveForType}
+          onReorder={reorderObjectivesForType}
         />
       )}
       {showManageResourcesAuth && (
