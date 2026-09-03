@@ -658,7 +658,7 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
         <div style={{ marginTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>Current and Planned Objectives</div>
-            <ObjectivePickerDropdown incidentTypePresets={incidentTypePresets} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
+            <ObjectivePickerDropdown incidentType={incident.type} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {incident.objectives.map((o, i) => {
@@ -3330,7 +3330,7 @@ function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjecti
       </Panel>
 
       <Panel title="7. Current and Planned Objectives" icon={ClipboardList} right={
-        <ObjectivePickerDropdown incidentTypePresets={incidentTypePresets} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
+        <ObjectivePickerDropdown incidentType={incident.type} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
       }>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {incident.objectives.map((o, i) => {
@@ -4878,19 +4878,14 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
 // running off narrow phone screens, a class of bug this app has hit
 // (and fixed) more than once elsewhere already, so this avoids it
 // entirely rather than risk a repeat.
-function ObjectivePickerDropdown({ incidentTypePresets, objectivesByType, onPick }) {
+function ObjectivePickerDropdown({ incidentType, objectivesByType, onPick }) {
   const [open, setOpen] = useState(false);
-  const [expandedType, setExpandedType] = useState(null);
   const wrapperRef = useRef(null);
+  const objectives = objectivesByType[incidentType] || [];
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setOpen(false);
-        setExpandedType(null);
-      }
-    };
+    const handler = (e) => { if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
@@ -4898,61 +4893,38 @@ function ObjectivePickerDropdown({ incidentTypePresets, objectivesByType, onPick
   const pick = (objective) => {
     onPick(objective);
     setOpen(false);
-    setExpandedType(null);
   };
 
   return (
     <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
       <Btn kind="subtle" icon={ChevronDown} onClick={() => setOpen(o => !o)} style={{ padding: "6px 11px", fontSize: 12.5 }}>
-        Pick Objective by Type
+        Pick Objective{incidentType ? ` (${incidentType})` : ""}
       </Btn>
       {open && (
         <div style={{
           position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 100,
           background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 6,
-          minWidth: 260, maxWidth: "90vw", boxShadow: "0 8px 24px rgba(0,0,0,0.35)", overflow: "hidden",
+          minWidth: 240, maxWidth: "90vw", maxHeight: 280, overflowY: "auto",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
         }}>
-          {incidentTypePresets.length === 0 && (
-            <div style={{ padding: "12px 14px", fontSize: 12.5, color: COLORS.faint }}>No incident types set up yet.</div>
+          {!incidentType ? (
+            <div style={{ padding: "12px 14px", fontSize: 12.5, color: COLORS.faint }}>Select an Incident Type above first.</div>
+          ) : objectives.length === 0 ? (
+            <div style={{ padding: "12px 14px", fontSize: 12.5, color: COLORS.faint }}>No objectives set up for {incidentType} yet.</div>
+          ) : (
+            objectives.map(obj => (
+              <button key={obj} onClick={() => pick(obj)}
+                style={{ width: "100%", textAlign: "left", padding: "9px 14px", background: "transparent", border: "none", borderBottom: `1px solid ${COLORS.line}`, color: COLORS.text, cursor: "pointer", fontSize: 13 }}>
+                {obj}
+              </button>
+            ))
           )}
-          {incidentTypePresets.map(type => {
-            const isExpanded = expandedType === type;
-            const objectives = objectivesByType[type] || [];
-            return (
-              <div key={type} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                <button
-                  onClick={() => setExpandedType(t => t === type ? null : type)}
-                  style={{
-                    width: "100%", textAlign: "left", padding: "10px 14px", background: isExpanded ? COLORS.panel2 : "transparent",
-                    border: "none", color: COLORS.text, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13,
-                  }}>
-                  {type}
-                  <ChevronRight size={14} style={{ transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
-                </button>
-                {isExpanded && (
-                  // The "second window" that balloons open beneath
-                  // the selected type.
-                  <div style={{ background: COLORS.bg, borderTop: `1px solid ${COLORS.line}`, padding: "6px 0", maxHeight: 220, overflowY: "auto" }}>
-                    {objectives.length === 0 ? (
-                      <div style={{ padding: "8px 20px", fontSize: 12, color: COLORS.faint }}>No objectives set up for {type} yet.</div>
-                    ) : (
-                      objectives.map(obj => (
-                        <button key={obj} onClick={() => pick(obj)}
-                          style={{ width: "100%", textAlign: "left", padding: "7px 20px", background: "transparent", border: "none", color: COLORS.text, cursor: "pointer", fontSize: 12.5 }}>
-                          {obj}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       )}
     </div>
   );
 }
+
 
 function ManageObjectivesModal({ onClose, onBack, incidentTypes, objectivesByType, onAdd, onRename, onDelete, onReorder }) {
   // Category list is exactly the incident types list from Manage
