@@ -54,6 +54,16 @@ const INCIDENT_TYPES = [
   { v: "MCI / EMS", c: COLORS.blue },
   { v: "All-Hazard / Other", c: COLORS.slate },
 ];
+// Used only to seed the editable incidentTypes preset list on first
+// load — once that list exists, colors come from incidentTypeColor
+// below instead (cycling by position), since a custom or reordered
+// list can't keep a fixed per-entry color the way this hardcoded
+// array originally did.
+const INCIDENT_TYPE_COLOR_PALETTE = [COLORS.red, COLORS.teal, "#8B5CF6", COLORS.blue, COLORS.slate, COLORS.amber, COLORS.orange];
+function incidentTypeColor(type, typeList) {
+  const idx = (typeList || []).indexOf(type);
+  return idx === -1 ? COLORS.slate : INCIDENT_TYPE_COLOR_PALETTE[idx % INCIDENT_TYPE_COLOR_PALETTE.length];
+}
 const RESOURCE_KINDS = [
   "Engine", "Ladder/Truck", "Tender/Tanker", "Brush Truck", "Rescue",
   "Ambulance/Medic", "Hazmat Unit", "Command Vehicle", "Air Unit",
@@ -526,7 +536,7 @@ function Panel({ title, icon: Icon, right, children, style }) {
 /* ============================================================
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
-function Tab201({ incident, setIncident, resources, objectivePresets, onSavePreset }) {
+function Tab201({ incident, setIncident, resources, objectivePresets, onSavePreset, incidentTypePresets }) {
   const [weatherStatus, setWeatherStatus] = useState(""); // "", "loading", or an error message
   const fetchCurrentWeather = () => {
     if (!navigator.geolocation) { setWeatherStatus("This device/browser doesn't support GPS location."); return; }
@@ -589,7 +599,13 @@ function Tab201({ incident, setIncident, resources, objectivePresets, onSavePres
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
             <Select value={incident.type} onChange={e => setIncident({ ...incident, type: e.target.value })}>
-              {INCIDENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.v}</option>)}
+              {/* Covers the case where this incident's current type was
+                  since deleted from the preset list (e.g. by an admin,
+                  or from an older save) — rendered as an extra option
+                  so the field doesn't silently show blank or jump to
+                  a different value out from under whatever was saved. */}
+              {incident.type && !incidentTypePresets.includes(incident.type) && <option value={incident.type}>{incident.type}</option>}
+              {incidentTypePresets.map(t => <option key={t} value={t}>{t}</option>)}
             </Select>
           </Field>
           <Field label="Location"><TextInput value={incident.location} onChange={e => setIncident({ ...incident, location: e.target.value })} placeholder="Address / cross streets / lat-long" /></Field>
@@ -4821,6 +4837,29 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
 /* ============================================================
    INCIDENT LIBRARY (load/save/new)
    ============================================================ */
+// Reuses FlatListManager directly — the exact same drag-to-reorder,
+// rename-inline, delete component already used for Resource Types
+// under Manage Resources, so this behaves identically rather than
+// introducing a second, slightly-different list-editing pattern.
+function ManageIncidentTypesModal({ onClose, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 380, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Incident Types</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          Edit a name and click away (or press Enter) to rename it. Drag to reorder — this is also the order shown in the Type dropdown on the Tactical Worksheet.
+        </div>
+        <FlatListManager
+          items={incidentTypes} onRename={onRename} onDelete={onDelete} onReorder={onReorder} onAdd={onAdd}
+          addLabel="Add Incident Type" addPlaceholder="New incident type" emptyLabel="None yet." />
+      </div>
+    </div>
+  );
+}
+
 // Consolidates the board's two credential-management actions —
 // changing the main PIN and changing the admin password itself —
 // behind the single "Admin" button in the header, which is already
@@ -4828,7 +4867,7 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -4839,6 +4878,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <Btn kind="ghost" icon={KeyRound} onClick={onChangePin} style={{ width: "100%", justifyContent: "center" }}>Change PIN</Btn>
           <Btn kind="ghost" icon={Lock} onClick={onChangeAdminPassword} style={{ width: "100%", justifyContent: "center" }}>Change Admin Password</Btn>
+          <Btn kind="ghost" icon={ClipboardList} onClick={onManageIncidentTypes} style={{ width: "100%", justifyContent: "center" }}>Manage Incident Types</Btn>
         </div>
       </div>
     </div>
@@ -5317,9 +5357,10 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [showChangePin, setShowChangePin] = useState(false);
   const [showAdminAuth, setShowAdminAuth] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showManageIncidentTypes, setShowManageIncidentTypes] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [] });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [] });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -5377,7 +5418,13 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // seed it from that same list on first load so nothing changes
       // for anyone until they actually go edit it.
       const resourceKinds = p.resourceKinds && p.resourceKinds.length > 0 ? p.resourceKinds : RESOURCE_KINDS;
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds });
+      // Same pattern for Incident Type — was a hardcoded list with a
+      // fixed color per entry; seeded from just the names here, with
+      // color now assigned by list position instead (see
+      // incidentTypeColor) so a custom/added type still gets one
+      // without needing a color-picker UI of its own.
+      const incidentTypes = p.incidentTypes && p.incidentTypes.length > 0 ? p.incidentTypes : INCIDENT_TYPES.map(t => t.v);
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -5559,6 +5606,32 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setPresets(next);
     savePresets(next);
   };
+  const addIncidentType = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed || presets.incidentTypes.includes(trimmed)) return;
+    const next = { ...presets, incidentTypes: [...presets.incidentTypes, trimmed] };
+    setPresets(next);
+    savePresets(next);
+  };
+  const renameIncidentType = (oldName, newName) => {
+    const next = { ...presets, incidentTypes: presets.incidentTypes.map(k => k === oldName ? newName : k) };
+    setPresets(next);
+    savePresets(next);
+    // Keep any incident currently using the old name pointed at its
+    // new one, the same way a resource kind rename doesn't silently
+    // orphan resources already using it.
+    if (incident.type === oldName) setIncident({ ...incident, type: newName });
+  };
+  const deleteIncidentType = (name) => {
+    const next = { ...presets, incidentTypes: presets.incidentTypes.filter(k => k !== name) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const reorderIncidentTypes = (newTypes) => {
+    const next = { ...presets, incidentTypes: newTypes };
+    setPresets(next);
+    savePresets(next);
+  };
   const saveObjectivePreset = async (objective) => {
     if (!objective || presets.objectives.includes(objective)) return;
     const next = { ...presets, objectives: [...presets.objectives, objective] };
@@ -5705,7 +5778,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     }
   };
 
-  const typeInfo = INCIDENT_TYPES.find(t => t.v === incident.type) || INCIDENT_TYPES[0];
+  const typeBadgeColor = incidentTypeColor(incident.type, presets.incidentTypes);
   // When the incident clock is stopped, resource/rehab timers freeze at
   // the same moment instead of continuing to count against real time.
   const effectiveNow = incident.opEnd ? new Date(incident.opEnd).getTime() : now;
@@ -5727,7 +5800,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
 
             <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginLeft: "auto" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: typeInfo.c, display: "inline-block" }} />
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: typeBadgeColor, display: "inline-block" }} />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{incident.name || "Untitled Incident"}</span>
                 <span style={{ fontSize: 11, color: COLORS.muted }}>({incident.type})</span>
               </div>
@@ -5796,7 +5869,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
             <>
-              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} />}
+              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} objectivePresets={presets.objectives} onSavePreset={saveObjectivePreset} incidentTypePresets={presets.incidentTypes} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
@@ -5858,9 +5931,20 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onClose={() => setShowAdminMenu(false)}
           onChangePin={() => { setShowAdminMenu(false); setShowChangePin(true); }}
           onChangeAdminPassword={() => { setShowAdminMenu(false); setShowChangeArchivePassword(true); }}
+          onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
         />
       )}
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
+      {showManageIncidentTypes && (
+        <ManageIncidentTypesModal
+          onClose={() => setShowManageIncidentTypes(false)}
+          incidentTypes={presets.incidentTypes}
+          onAdd={addIncidentType}
+          onRename={renameIncidentType}
+          onDelete={deleteIncidentType}
+          onReorder={reorderIncidentTypes}
+        />
+      )}
 
       {showArchive && (
         <ArchiveModal
