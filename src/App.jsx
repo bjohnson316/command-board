@@ -2121,6 +2121,12 @@ function TabWeather() {
     gpsMarkerRef.current = L.marker([coords.lat, coords.lng]).addTo(map).bindPopup("Your location");
     setTimeout(() => map.invalidateSize(), 100);
     setMapReady(true);
+    // Starts animating automatically once the map is centered on the
+    // user's location, rather than requiring a manual tap on Animate
+    // — the animation loop already handles radarFrames still being
+    // empty at this point gracefully, so it just starts moving the
+    // moment frames actually finish loading.
+    setRadarPlaying(true);
     return () => { map.remove(); mapRef.current = null; radarLayersRef.current = {}; setMapReady(false); };
   }, [coords]);
 
@@ -2317,7 +2323,7 @@ function TabWeather() {
         )
       }>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 10, lineHeight: 1.5 }}>
-          Centered on your current GPS location. Pan and zoom like any other map — the radar overlay updates automatically every 5 minutes, and Animate loops through the recent frames for a moving view of the storm.
+          Centered on your current GPS location. Pan and zoom like any other map — the radar overlay updates automatically every 5 minutes, and animates automatically for a moving view of the storm. Use Pause to stop on a single frame.
           {radarError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{radarError}</span>}
           {!coords && !locError && <span style={{ display: "block", marginTop: 4 }}>Waiting for GPS location...</span>}
         </div>
