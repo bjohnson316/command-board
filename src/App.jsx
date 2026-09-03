@@ -4,7 +4,7 @@ import {
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
-  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause
+  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -578,7 +578,7 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
   // General ones that make sense no matter the type — General isn't
   // an incident type of its own, just a catch-all category managed
   // the same way from the Admin panel.
-  const relevantObjectives = [...(objectivesByType.General || []), ...(objectivesByType[incident.type] || [])];
+  const relevantObjectives = objectivesByType[incident.type] || [];
   // Quick-add fills the first blank row left over from "Add
   // Objective" if one exists, rather than always appending a new one
   // underneath it — clicking a suggestion right after adding a blank
@@ -656,17 +656,10 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8 }}>Current and Planned Objectives</div>
-          {relevantObjectives.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-              {relevantObjectives.filter(o => !incident.objectives.includes(o)).map(o => (
-                <button key={o} onClick={() => addObjectiveFromPreset(o)}
-                  style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 12, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.text, cursor: "pointer" }}>
-                  + {o}
-                </button>
-              ))}
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>Current and Planned Objectives</div>
+            <ObjectivePickerDropdown incidentTypePresets={incidentTypePresets} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {incident.objectives.map((o, i) => {
               const isNewObjective = o.trim() && !relevantObjectives.includes(o.trim());
@@ -3273,14 +3266,14 @@ function Tab206({ ics206, setIcs206, incident }) {
 // read/write the same underlying incident fields, so filling in one
 // updates the other. This is the one that includes the Resource
 // Summary table (Block 10), matching the official form exactly.
-function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjective }) {
+function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjective, incidentTypePresets }) {
   const updateObjective = (i, val) => {
     const next = [...incident.objectives]; next[i] = val;
     setIncident({ ...incident, objectives: next });
   };
   const addObjective = () => setIncident({ ...incident, objectives: [...incident.objectives, ""] });
   const removeObjective = (i) => setIncident({ ...incident, objectives: incident.objectives.filter((_, idx) => idx !== i) });
-  const relevantObjectives = [...(objectivesByType.General || []), ...(objectivesByType[incident.type] || [])];
+  const relevantObjectives = objectivesByType[incident.type] || [];
   const addObjectiveFromPreset = (text) => {
     if (incident.objectives.includes(text)) return;
     const emptyIdx = incident.objectives.findIndex(o => !o.trim());
@@ -3333,17 +3326,9 @@ function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjecti
         </div>
       </Panel>
 
-      <Panel title="7. Current and Planned Objectives" icon={ClipboardList}>
-        {relevantObjectives.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {relevantObjectives.filter(o => !incident.objectives.includes(o)).map(o => (
-              <button key={o} onClick={() => addObjectiveFromPreset(o)}
-                style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 12, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, color: COLORS.text, cursor: "pointer" }}>
-                + {o}
-              </button>
-            ))}
-          </div>
-        )}
+      <Panel title="7. Current and Planned Objectives" icon={ClipboardList} right={
+        <ObjectivePickerDropdown incidentTypePresets={incidentTypePresets} objectivesByType={objectivesByType} onPick={addObjectiveFromPreset} />
+      }>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {incident.objectives.map((o, i) => {
             const isNewObjective = o.trim() && !relevantObjectives.includes(o.trim());
@@ -3453,7 +3438,7 @@ function TabICSForms(props) {
         </div>
       </Panel>
 
-      {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivesByType={props.objectivesByType} onAddObjective={props.onAddObjective} />}
+      {selected === "201full" && <Tab201Full incident={props.incident} setIncident={props.setIncident} org={props.org} objectivesByType={props.objectivesByType} onAddObjective={props.onAddObjective} incidentTypePresets={props.incidentTypePresets} />}
       {selected === "205" && <TabComms comms={props.comms} setComms={props.setComms} incident={props.incident} />}
       {selected === "215a" && <Tab215A safety={props.safety} setSafety={props.setSafety} org={props.org} incident={props.incident} />}
       {selected === "208" && <Tab208 ics208={props.ics208} setIcs208={props.setIcs208} incident={props.incident} />}
@@ -4883,9 +4868,95 @@ function PrintView({ incident, resources, comms, org, safety, logs }) {
 // Reuses FlatListManager for the actual list editing, same as the
 // other two preset-management modals, just with a category picker on
 // top to choose which type's list is currently being edited.
+// Two-level "pick incident type, then pick from its objectives"
+// cascading picker for the Tactical Worksheet. The second level opens
+// directly beneath the selected type as its own visually distinct
+// panel — a real side-flyout was considered, but those are prone to
+// running off narrow phone screens, a class of bug this app has hit
+// (and fixed) more than once elsewhere already, so this avoids it
+// entirely rather than risk a repeat.
+function ObjectivePickerDropdown({ incidentTypePresets, objectivesByType, onPick }) {
+  const [open, setOpen] = useState(false);
+  const [expandedType, setExpandedType] = useState(null);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+        setExpandedType(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const pick = (objective) => {
+    onPick(objective);
+    setOpen(false);
+    setExpandedType(null);
+  };
+
+  return (
+    <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
+      <Btn kind="subtle" icon={ChevronDown} onClick={() => setOpen(o => !o)} style={{ padding: "6px 11px", fontSize: 12.5 }}>
+        Pick Objective by Type
+      </Btn>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 100,
+          background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 6,
+          minWidth: 260, maxWidth: "90vw", boxShadow: "0 8px 24px rgba(0,0,0,0.35)", overflow: "hidden",
+        }}>
+          {incidentTypePresets.length === 0 && (
+            <div style={{ padding: "12px 14px", fontSize: 12.5, color: COLORS.faint }}>No incident types set up yet.</div>
+          )}
+          {incidentTypePresets.map(type => {
+            const isExpanded = expandedType === type;
+            const objectives = objectivesByType[type] || [];
+            return (
+              <div key={type} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <button
+                  onClick={() => setExpandedType(t => t === type ? null : type)}
+                  style={{
+                    width: "100%", textAlign: "left", padding: "10px 14px", background: isExpanded ? COLORS.panel2 : "transparent",
+                    border: "none", color: COLORS.text, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13,
+                  }}>
+                  {type}
+                  <ChevronRight size={14} style={{ transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+                </button>
+                {isExpanded && (
+                  // The "second window" that balloons open beneath
+                  // the selected type.
+                  <div style={{ background: COLORS.bg, borderTop: `1px solid ${COLORS.line}`, padding: "6px 0", maxHeight: 220, overflowY: "auto" }}>
+                    {objectives.length === 0 ? (
+                      <div style={{ padding: "8px 20px", fontSize: 12, color: COLORS.faint }}>No objectives set up for {type} yet.</div>
+                    ) : (
+                      objectives.map(obj => (
+                        <button key={obj} onClick={() => pick(obj)}
+                          style={{ width: "100%", textAlign: "left", padding: "7px 20px", background: "transparent", border: "none", color: COLORS.text, cursor: "pointer", fontSize: 12.5 }}>
+                          {obj}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd, onRename, onDelete, onReorder }) {
-  const categories = ["General", ...incidentTypes];
-  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
+  // Category list is exactly the incident types list from Manage
+  // Incident Types — no extra catch-all category, so the two stay in
+  // lockstep with each other rather than the objectives side having
+  // its own separate notion of what a category is.
+  const [selectedCategory, setSelectedCategory] = useState(incidentTypes[0] || "");
   const list = objectivesByType[selectedCategory] || [];
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
@@ -4895,23 +4966,29 @@ function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
-          Objectives are grouped by incident type — pick a category below to edit its list. General objectives show up as suggestions no matter which incident type is selected on the Tactical Worksheet.
+          Objectives are grouped by incident type — pick one below to edit its list. This is the same list of types managed under Manage Incident Types.
         </div>
-        <Field label="Category">
-          <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </Select>
-        </Field>
-        <div style={{ marginTop: 14 }}>
-          <FlatListManager
-            items={list}
-            onAdd={(name) => onAdd(selectedCategory, name)}
-            onRename={(oldName, newName) => onRename(selectedCategory, oldName, newName)}
-            onDelete={(name) => onDelete(selectedCategory, name)}
-            onReorder={(newList) => onReorder(selectedCategory, newList)}
-            addLabel="Add Objective" addPlaceholder="New objective" emptyLabel="None yet."
-          />
-        </div>
+        {incidentTypes.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint }}>No incident types set up yet — add some under Manage Incident Types first.</div>
+        ) : (
+          <>
+            <Field label="Incident Type">
+              <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+                {incidentTypes.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </Field>
+            <div style={{ marginTop: 14 }}>
+              <FlatListManager
+                items={list}
+                onAdd={(name) => onAdd(selectedCategory, name)}
+                onRename={(oldName, newName) => onRename(selectedCategory, oldName, newName)}
+                onDelete={(name) => onDelete(selectedCategory, name)}
+                onReorder={(newList) => onReorder(selectedCategory, newList)}
+                addLabel="Add Objective" addPlaceholder="New objective" emptyLabel="None yet."
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -6008,7 +6085,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                   ics206={ics206} setIcs206={setIcs206}
                   logs={logs} setLogs={setLogs}
                   mapData={mapData}
-                  objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType}
+                  objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} incidentTypePresets={presets.incidentTypes}
                   formsUsed={formsUsed} toggleFormUsed={toggleFormUsed}
                 />
               )}
