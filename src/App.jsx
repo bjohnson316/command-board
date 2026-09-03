@@ -4,7 +4,7 @@ import {
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
-  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown
+  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown, ChevronLeft
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -855,7 +855,7 @@ function ManageResourcesModal({
   departments, onRenameDept, onDeleteDept, onReorderDept, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, onAddDepartment, onAddUnitUnderDepartment,
   assignments, onRenameAssignment, onDeleteAssignment, onReorderAssignment, onAddAssignment,
   resourceKinds, onRenameKind, onDeleteKind, onReorderKind, onAddKind,
-  onClose,
+  onClose, onBack,
 }) {
   const [subTab, setSubTab] = useState("departments"); // departments | assignments | kinds
   const [addingDeptFor, setAddingDeptFor] = useState(false);
@@ -885,7 +885,10 @@ function ManageResourcesModal({
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 560, maxHeight: "84vh", overflowY: "auto", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 15 }}>Manage Resources</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 15 }}>Manage Resources</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
         </div>
 
@@ -4951,7 +4954,7 @@ function ObjectivePickerDropdown({ incidentTypePresets, objectivesByType, onPick
   );
 }
 
-function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd, onRename, onDelete, onReorder }) {
+function ManageObjectivesModal({ onClose, onBack, incidentTypes, objectivesByType, onAdd, onRename, onDelete, onReorder }) {
   // Category list is exactly the incident types list from Manage
   // Incident Types — no extra catch-all category, so the two stay in
   // lockstep with each other rather than the objectives side having
@@ -4962,7 +4965,10 @@ function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 400, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Objectives</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Objectives</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
@@ -4994,12 +5000,15 @@ function ManageObjectivesModal({ onClose, incidentTypes, objectivesByType, onAdd
   );
 }
 
-function ManageIncidentTypesModal({ onClose, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
+function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 380, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Incident Types</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Manage Incident Types</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
@@ -5040,7 +5049,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
   );
 }
 
-function ChangePinModal({ onClose }) {
+function ChangePinModal({ onClose, onBack }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -5066,7 +5075,10 @@ function ChangePinModal({ onClose }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change PIN</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change PIN</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         {status === "done" ? (
@@ -5097,7 +5109,7 @@ function ChangePinModal({ onClose }) {
 // Mirrors ChangePinModal above, but targets the archive's separate
 // password (archivePinHash) rather than the board's main PIN — kept as
 // its own component since the two are genuinely different credentials.
-function ChangeArchivePasswordModal({ onClose }) {
+function ChangeArchivePasswordModal({ onClose, onBack }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -5123,7 +5135,10 @@ function ChangeArchivePasswordModal({ onClose }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change Admin Password</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Change Admin Password</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
         {status === "done" ? (
@@ -5520,6 +5535,11 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // only ever take effect while that specific tab happened to be the
   // one currently mounted.
   const [showManageResources, setShowManageResources] = useState(false);
+  // Manage Resources has two separate entry points (its own button on
+  // the Resource Board, and now also the Admin menu) — this tracks
+  // which one was used so the "Back to Admin" button only shows up
+  // when there's actually an Admin menu to go back to.
+  const [manageResourcesFromAdmin, setManageResourcesFromAdmin] = useState(false);
   const [showManageObjectives, setShowManageObjectives] = useState(false);
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
@@ -6123,14 +6143,15 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onChangePin={() => { setShowAdminMenu(false); setShowChangePin(true); }}
           onChangeAdminPassword={() => { setShowAdminMenu(false); setShowChangeArchivePassword(true); }}
           onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
-          onManageResources={() => { setShowAdminMenu(false); setShowManageResources(true); }}
+          onManageResources={() => { setShowAdminMenu(false); setManageResourcesFromAdmin(true); setShowManageResources(true); }}
           onManageObjectives={() => { setShowAdminMenu(false); setShowManageObjectives(true); }}
         />
       )}
-      {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} />}
+      {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} onBack={() => { setShowChangePin(false); setShowAdminMenu(true); }} />}
       {showManageIncidentTypes && (
         <ManageIncidentTypesModal
           onClose={() => setShowManageIncidentTypes(false)}
+          onBack={() => { setShowManageIncidentTypes(false); setShowAdminMenu(true); }}
           incidentTypes={presets.incidentTypes}
           onAdd={addIncidentType}
           onRename={renameIncidentType}
@@ -6141,6 +6162,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
       {showManageObjectives && (
         <ManageObjectivesModal
           onClose={() => setShowManageObjectives(false)}
+          onBack={() => { setShowManageObjectives(false); setShowAdminMenu(true); }}
           incidentTypes={presets.incidentTypes}
           objectivesByType={presets.objectivesByType}
           onAdd={addObjectiveForType}
@@ -6153,7 +6175,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
         <PasswordConfirmModal
           title="Admin Password Required"
           message="Enter the admin password to manage departments, units, assignments, and resource types."
-          onConfirm={() => { setShowManageResourcesAuth(false); setShowManageResources(true); }}
+          onConfirm={() => { setShowManageResourcesAuth(false); setManageResourcesFromAdmin(false); setShowManageResources(true); }}
           onCancel={() => setShowManageResourcesAuth(false)}
         />
       )}
@@ -6167,6 +6189,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           resourceKinds={presets.resourceKinds} onRenameKind={renameResourceKind} onDeleteKind={deleteResourceKind}
           onReorderKind={reorderResourceKinds} onAddKind={addResourceKind}
           onClose={() => setShowManageResources(false)}
+          onBack={manageResourcesFromAdmin ? () => { setShowManageResources(false); setShowAdminMenu(true); } : undefined}
         />
       )}
 
@@ -6179,7 +6202,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
         />
       )}
 
-      {showChangeArchivePassword && <ChangeArchivePasswordModal onClose={() => setShowChangeArchivePassword(false)} />}
+      {showChangeArchivePassword && <ChangeArchivePasswordModal onClose={() => setShowChangeArchivePassword(false)} onBack={() => { setShowChangeArchivePassword(false); setShowAdminMenu(true); }} />}
     </div>
   );
 }
