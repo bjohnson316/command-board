@@ -5038,7 +5038,7 @@ function PasswordConfirmModal({ title, message, onConfirm, onCancel }) {
   );
 }
 
-function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOpenArchive, mandatory }) {
+function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOpenArchive, onOpenAdmin, mandatory }) {
   const active = index.filter(i => !i.archived);
   const archivedCount = index.length - active.length;
   const [confirmAction, setConfirmAction] = useState(null); // { type: "archive" | "delete", id, name }
@@ -5055,6 +5055,7 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 11, color: COLORS.muted, letterSpacing: "0.05em", textTransform: "uppercase" }}>Incident Library</span>
+            <Btn kind="ghost" icon={Settings} onClick={onOpenAdmin} style={{ padding: "5px 9px", fontSize: 11.5 }}>Admin</Btn>
             {!mandatory && <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>}
           </div>
         </div>
@@ -5902,7 +5903,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
 
       {ready && (showLib || !incidentLoaded) && (
         <LibraryModal index={index} onClose={() => setShowLib(false)} onLoad={openIncident} onNew={startNew} onDelete={deleteIncident}
-          onArchive={archiveIncident} onOpenArchive={() => setShowArchive(true)} mandatory={!incidentLoaded} />
+          onArchive={archiveIncident} onOpenArchive={() => setShowArchive(true)} onOpenAdmin={() => setShowAdminAuth(true)} mandatory={!incidentLoaded} />
       )}
 
       {showAdminAuth && (
