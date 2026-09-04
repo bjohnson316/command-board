@@ -55,12 +55,22 @@ function normalizeResourceStatus(status) {
 }
 const STATUS_COLOR = {
   Staging: COLORS.amber,
-  Assigned: COLORS.blue,
-  Working: COLORS.orange,
   Rehab: COLORS.teal,
   "Out of Service": COLORS.slate,
   Released: COLORS.faint,
 };
+// Deterministic color per assignment/division column, cycling by
+// position — same idea as incidentTypeColor further down, since
+// assignments are a user-managed, reorderable list with no fixed
+// per-entry color of their own. "Unassigned" always gets a muted,
+// de-emphasized color rather than cycling in, since it's a catch-all
+// bucket rather than an actual division.
+const ASSIGNMENT_COLOR_PALETTE = [COLORS.amber, COLORS.teal, COLORS.blue, "#8B5CF6", COLORS.orange, COLORS.red];
+function assignmentColumnColor(assignment, columns) {
+  if (assignment === "Unassigned") return COLORS.faint;
+  const idx = columns.indexOf(assignment);
+  return idx === -1 ? COLORS.slate : ASSIGNMENT_COLOR_PALETTE[idx % ASSIGNMENT_COLOR_PALETTE.length];
+}
 const INCIDENT_TYPES = [
   { v: "Structure Fire", c: COLORS.red },
   { v: "Wildland Fire", c: COLORS.teal },
@@ -1205,32 +1215,51 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // the Pointer Events API + elementFromPoint rather than native HTML5
   // drag-and-drop, because HTML5 DnD is unreliable on touch devices —
   // this app needs to work on iPads and phones, not just desktop mice.
-  const [drag, setDrag] = useState(null); // { id, x, y, overStatus }
+  const [drag, setDrag] = useState(null); // { id, x, y, overColumn }
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
-  const moveResource = (id, status) => setResources(resources.map(r => r.id === id ? { ...r, status, statusSince: nowISO(), history: [...r.history, { status, at: nowISO() }] } : r));
+  const moveResourceStatus = (id, status) => setResources(resources.map(r => r.id === id ? { ...r, status, statusSince: nowISO(), history: [...r.history, { status, at: nowISO() }] } : r));
   const updateResource = (id, patch) => setResources(resources.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  const columnStatusAt = (x, y) => {
+  // Columns are now grouped by Assignment/Division rather than
+  // status — a new column appears automatically the moment a resource
+  // is checked in (or edited) with an assignment value nobody's used
+  // yet. Order follows the Assignments preset list (so it matches
+  // what's managed under Manage Resources) for anything currently in
+  // use, then appends any in-use value that isn't in that list at all
+  // (e.g. something free-typed once and never saved as a preset).
+  // "Unassigned" is always present as a landing spot for anything
+  // checked in before a division is decided.
+  const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
+  const orderedAssignments = [
+    ...assignmentPresets.filter(a => usedAssignments.includes(a)),
+    ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
+  ];
+  const columns = ["Unassigned", ...orderedAssignments];
+  const columnFor = (r) => r.assignment || "Unassigned";
+  const moveResourceAssignment = (id, column) => updateResource(id, { assignment: column === "Unassigned" ? "" : column });
+
+  const columnAt = (x, y) => {
     const el = document.elementFromPoint(x, y);
-    const colEl = el && el.closest("[data-column-status]");
-    return colEl ? colEl.getAttribute("data-column-status") : null;
+    const colEl = el && el.closest("[data-column-assignment]");
+    return colEl ? colEl.getAttribute("data-column-assignment") : null;
   };
 
   const handlePointerDown = (r, e) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ id: r.id, x: e.clientX, y: e.clientY, overStatus: r.status });
+    setDrag({ id: r.id, x: e.clientX, y: e.clientY, overColumn: columnFor(r) });
   };
   const handlePointerMove = (e) => {
-    setDrag(d => d ? { ...d, x: e.clientX, y: e.clientY, overStatus: columnStatusAt(e.clientX, e.clientY) } : d);
+    setDrag(d => d ? { ...d, x: e.clientX, y: e.clientY, overColumn: columnAt(e.clientX, e.clientY) } : d);
   };
   const endDrag = (e, commit) => {
     setDrag(d => {
       if (d && commit) {
-        const target = columnStatusAt(e.clientX, e.clientY);
-        if (target && target !== resources.find(r => r.id === d.id)?.status) moveResource(d.id, target);
+        const target = columnAt(e.clientX, e.clientY);
+        const current = resources.find(r => r.id === d.id);
+        if (target && current && target !== columnFor(current)) moveResourceAssignment(d.id, target);
       }
       return null;
     });
@@ -1245,23 +1274,24 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
       }>
         <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
       </Panel>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
-        {STATUS_FLOW.map(status => {
-          const items = resources.filter(r => r.status === status);
-          const isOver = drag && drag.overStatus === status && drag.id && resources.find(r => r.id === drag.id)?.status !== status;
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
+        {columns.map(col => {
+          const items = resources.filter(r => columnFor(r) === col);
+          const color = assignmentColumnColor(col, columns);
+          const isOver = drag && drag.overColumn === col && drag.id && columnFor(resources.find(r => r.id === drag.id) || {}) !== col;
           return (
-            <div key={status} data-column-status={status} style={{
-              background: COLORS.panel, border: `1px solid ${isOver ? STATUS_COLOR[status] : COLORS.line}`,
-              borderTop: `3px solid ${STATUS_COLOR[status]}`, borderRadius: 6, padding: 10, minHeight: 200,
-              boxShadow: isOver ? `0 0 0 2px ${STATUS_COLOR[status]}` : "none", transition: "box-shadow 0.1s",
+            <div key={col} data-column-assignment={col} style={{
+              background: COLORS.panel, border: `1px solid ${isOver ? color : COLORS.line}`,
+              borderTop: `3px solid ${color}`, borderRadius: 6, padding: 10, minHeight: 200,
+              boxShadow: isOver ? `0 0 0 2px ${color}` : "none", transition: "box-shadow 0.1s",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 12.5 }}>{status}</span>
+                <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 12.5 }}>{col}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.muted }}>{items.length}</span>
               </div>
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
               {items.map(r => (
-                <ResourceCard key={r.id} r={r} onMove={moveResource} onUpdate={updateResource} onRemove={removeResource} now={now}
+                <ResourceCard key={r.id} r={r} onMove={moveResourceStatus} onUpdate={updateResource} onRemove={removeResource} now={now}
                   isDragging={drag && drag.id === r.id}
                   dragProps={{
                     onPointerDown: (e) => handlePointerDown(r, e),
