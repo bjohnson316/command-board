@@ -71,6 +71,19 @@ function assignmentColumnColor(assignment, columns) {
   const idx = columns.indexOf(assignment);
   return idx === -1 ? COLORS.slate : ASSIGNMENT_COLOR_PALETTE[idx % ASSIGNMENT_COLOR_PALETTE.length];
 }
+// Shared by the Resource Board itself and the Tactical Worksheet's
+// "Resource Board Status" summary, so both always agree on exactly
+// which columns exist and in what order — a new division shows up in
+// both places the moment a resource uses it, and neither can drift
+// out of sync with the other since they run the exact same logic.
+function deriveAssignmentColumns(resources, assignmentPresets) {
+  const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
+  const orderedAssignments = [
+    ...assignmentPresets.filter(a => usedAssignments.includes(a)),
+    ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
+  ];
+  return ["Unassigned", ...orderedAssignments];
+}
 const INCIDENT_TYPES = [
   { v: "Structure Fire", c: COLORS.red },
   { v: "Wildland Fire", c: COLORS.teal },
@@ -560,7 +573,7 @@ function Panel({ title, icon: Icon, right, children, style }) {
 /* ============================================================
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
-function Tab201({ incident, setIncident, resources, incidentTypePresets, objectivesByType, onAddObjective }) {
+function Tab201({ incident, setIncident, resources, incidentTypePresets, objectivesByType, onAddObjective, assignmentPresets }) {
   const [weatherStatus, setWeatherStatus] = useState(""); // "", "loading", or an error message
   const fetchCurrentWeather = () => {
     if (!navigator.geolocation) { setWeatherStatus("This device/browser doesn't support GPS location."); return; }
@@ -623,7 +636,13 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
   const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
   const removeAction = (id) => setIncident({ ...incident, actionsLog: incident.actionsLog.filter(a => a.id !== id) });
 
-  const counts = STATUS_FLOW.map(s => ({ status: s, n: resources.filter(r => r.status === s).length }));
+  // Mirrors the Resource Board's own grouping now that it organizes
+  // by Assignment/Division rather than status — this summary follows
+  // suit so the two never show conflicting pictures of where
+  // resources currently stand.
+  const assignmentColumns = deriveAssignmentColumns(resources, assignmentPresets);
+  const columnFor = (r) => r.assignment || "Unassigned";
+  const counts = assignmentColumns.map(col => ({ column: col, n: resources.filter(r => columnFor(r) === col).length }));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -741,9 +760,9 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
       <Panel title="Resource Board Status" icon={Truck}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 10 }}>
           {counts.map(c => (
-            <div key={c.status} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: "10px 8px", textAlign: "center" }}>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, color: STATUS_COLOR[c.status] }}>{c.n}</div>
-              <div style={{ fontSize: 10.5, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 2 }}>{c.status}</div>
+            <div key={c.column} style={{ background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, color: assignmentColumnColor(c.column, assignmentColumns) }}>{c.n}</div>
+              <div style={{ fontSize: 10.5, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 2 }}>{c.column}</div>
             </div>
           ))}
         </div>
@@ -1225,18 +1244,10 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // Columns are now grouped by Assignment/Division rather than
   // status — a new column appears automatically the moment a resource
   // is checked in (or edited) with an assignment value nobody's used
-  // yet. Order follows the Assignments preset list (so it matches
-  // what's managed under Manage Resources) for anything currently in
-  // use, then appends any in-use value that isn't in that list at all
-  // (e.g. something free-typed once and never saved as a preset).
-  // "Unassigned" is always present as a landing spot for anything
-  // checked in before a division is decided.
-  const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
-  const orderedAssignments = [
-    ...assignmentPresets.filter(a => usedAssignments.includes(a)),
-    ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
-  ];
-  const columns = ["Unassigned", ...orderedAssignments];
+  // yet. See deriveAssignmentColumns for the shared ordering logic
+  // (also used by the Tactical Worksheet's status summary, so both
+  // stay in sync).
+  const columns = deriveAssignmentColumns(resources, assignmentPresets);
   const columnFor = (r) => r.assignment || "Unassigned";
   const moveResourceAssignment = (id, column) => updateResource(id, { assignment: column === "Unassigned" ? "" : column });
 
@@ -6154,7 +6165,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
             <>
-              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} />}
+              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} assignmentPresets={presets.assignments} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
