@@ -81,6 +81,25 @@ function assignmentColumnColor(assignment, columns) {
 // corresponds to a real column keeps that position; anything new
 // (e.g. a division nobody had used yet when the order was last saved)
 // is appended at the end rather than silently dropped.
+// Merges a set of objectives into an existing objectives list without
+// destroying anything already there — each one either fills the
+// first blank row (left over from "Add Objective") if one exists, or
+// gets appended, and anything already present (exact text match) is
+// skipped rather than duplicated. Shared by the single-objective
+// "Pick Objective by Type" picker and the "select an Incident Type"
+// auto-populate behavior, so both use identical, non-destructive
+// merge semantics rather than two slightly different implementations.
+function mergeObjectivesIntoList(current, toAdd) {
+  let result = [...current];
+  toAdd.forEach(obj => {
+    if (result.includes(obj)) return;
+    const emptyIdx = result.findIndex(o => !o.trim());
+    if (emptyIdx !== -1) result[emptyIdx] = obj;
+    else result.push(obj);
+  });
+  return result;
+}
+
 function deriveAssignmentColumns(resources, assignmentPresets, customOrder) {
   const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
   const defaultColumns = [
@@ -629,15 +648,16 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
   // underneath it — clicking a suggestion right after adding a blank
   // row is the common case, and this avoids leaving that blank row
   // orphaned above the newly-added text.
-  const addObjectiveFromPreset = (text) => {
-    if (incident.objectives.includes(text)) return;
-    const emptyIdx = incident.objectives.findIndex(o => !o.trim());
-    if (emptyIdx !== -1) {
-      const next = [...incident.objectives]; next[emptyIdx] = text;
-      setIncident({ ...incident, objectives: next });
-    } else {
-      setIncident({ ...incident, objectives: [...incident.objectives, text] });
-    }
+  const addObjectiveFromPreset = (text) => setIncident({ ...incident, objectives: mergeObjectivesIntoList(incident.objectives, [text]) });
+  // Selecting an Incident Type auto-populates every objective defined
+  // for it (see Manage Objectives) straight into the list — merged in
+  // non-destructively via the same logic as the single-objective
+  // picker above, so switching types never wipes out anything already
+  // typed, and re-selecting a type already populated won't duplicate
+  // it either.
+  const handleTypeChange = (newType) => {
+    const newObjectives = objectivesByType[newType] || [];
+    setIncident({ ...incident, type: newType, objectives: mergeObjectivesIntoList(incident.objectives, newObjectives) });
   };
 
   const addAction = () => setIncident({ ...incident, actionsLog: [...incident.actionsLog, { id: uid(), time: "", actions: "" }] });
@@ -669,7 +689,7 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
-            <Select value={incident.type} onChange={e => setIncident({ ...incident, type: e.target.value })}>
+            <Select value={incident.type} onChange={e => handleTypeChange(e.target.value)}>
               {/* Covers the case where this incident's current type was
                   since deleted from the preset list (e.g. by an admin,
                   or from an older save) — rendered as an extra option
@@ -3405,16 +3425,7 @@ function Tab201Full({ incident, setIncident, org, objectivesByType, onAddObjecti
   const addObjective = () => setIncident({ ...incident, objectives: [...incident.objectives, ""] });
   const removeObjective = (i) => setIncident({ ...incident, objectives: incident.objectives.filter((_, idx) => idx !== i) });
   const relevantObjectives = objectivesByType[incident.type] || [];
-  const addObjectiveFromPreset = (text) => {
-    if (incident.objectives.includes(text)) return;
-    const emptyIdx = incident.objectives.findIndex(o => !o.trim());
-    if (emptyIdx !== -1) {
-      const next = [...incident.objectives]; next[emptyIdx] = text;
-      setIncident({ ...incident, objectives: next });
-    } else {
-      setIncident({ ...incident, objectives: [...incident.objectives, text] });
-    }
-  };
+  const addObjectiveFromPreset = (text) => setIncident({ ...incident, objectives: mergeObjectivesIntoList(incident.objectives, [text]) });
 
   const addAction = () => setIncident({ ...incident, actionsLog: [...incident.actionsLog, { id: uid(), time: "", actions: "" }] });
   const updateAction = (id, patch) => setIncident({ ...incident, actionsLog: incident.actionsLog.map(a => a.id === id ? { ...a, ...patch } : a) });
