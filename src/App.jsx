@@ -65,6 +65,12 @@ const STATUS_COLOR = {
 // per-entry color of their own.
 const ASSIGNMENT_COLOR_PALETTE = [COLORS.amber, COLORS.teal, COLORS.blue, "#8B5CF6", COLORS.orange, COLORS.red];
 function assignmentColumnColor(assignment, columns) {
+  // Rehab/Out of Service use their existing, already-meaningful
+  // STATUS_COLOR (the same color already shown on a card's left
+  // border for that status) rather than an arbitrary cycling color —
+  // they're not really "just another division" visually any more
+  // than they are structurally.
+  if (STATUS_COLOR[assignment]) return STATUS_COLOR[assignment];
   const idx = columns.indexOf(assignment);
   return idx === -1 ? COLORS.slate : ASSIGNMENT_COLOR_PALETTE[idx % ASSIGNMENT_COLOR_PALETTE.length];
 }
@@ -100,12 +106,33 @@ function mergeObjectivesIntoList(current, toAdd) {
   return result;
 }
 
+// A resource currently in Rehab or Out of Service is pulled into its
+// own dedicated column instead of its assignment's column — this is
+// the single source of truth for that rule, used both to decide which
+// column a resource's card renders in and to decide which columns
+// exist at all (see deriveAssignmentColumns below), so the two can
+// never disagree with each other.
+function columnFor(r) {
+  if (r.status === "Rehab" || r.status === "Out of Service") return r.status;
+  return r.assignment || "Unassigned";
+}
 function deriveAssignmentColumns(resources, assignmentPresets, customOrder) {
-  const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
+  // Only resources NOT currently pulled into Rehab/Out of Service
+  // count toward which assignment columns exist — a division with
+  // every one of its resources temporarily in Rehab shouldn't still
+  // show as its own (now-empty) column at the same time Rehab exists.
+  const activeResources = resources.filter(r => r.status !== "Rehab" && r.status !== "Out of Service");
+  const usedAssignments = [...new Set(activeResources.map(r => r.assignment).filter(Boolean))];
   const defaultColumns = [
     ...assignmentPresets.filter(a => usedAssignments.includes(a)),
     ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
   ];
+  // Rehab/Out of Service are appended after the real division columns
+  // — they're temporary holding columns, not divisions, and only
+  // exist at all while at least one resource currently has that
+  // status, disappearing again the moment the last one leaves it.
+  if (resources.some(r => r.status === "Rehab")) defaultColumns.push("Rehab");
+  if (resources.some(r => r.status === "Out of Service")) defaultColumns.push("Out of Service");
   if (!customOrder || customOrder.length === 0) return defaultColumns;
   const known = customOrder.filter(c => defaultColumns.includes(c));
   const newOnes = defaultColumns.filter(c => !customOrder.includes(c));
@@ -669,7 +696,6 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
   // suit so the two never show conflicting pictures of where
   // resources currently stand.
   const assignmentColumns = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder);
-  const columnFor = (r) => r.assignment || "Unassigned";
   const counts = assignmentColumns.map(col => ({ column: col, n: resources.filter(r => columnFor(r) === col).length }));
 
   return (
@@ -1296,14 +1322,32 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // (also used by the Tactical Worksheet's status summary, so both
   // stay in sync).
   const columns = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder);
-  const columnFor = (r) => r.assignment || "Unassigned";
   // "Unassigned" is no longer a special catch-all bucket — it's just
   // whatever ordinary column name a legacy resource without a real
   // division happened to get migrated to (see the load logic in
   // AppInner), so dropping a card on it sets that literal value like
   // any other column, rather than clearing the assignment back to
   // empty the way it used to when "Unassigned" meant "no division."
-  const moveResourceAssignment = (id, column) => updateResource(id, { assignment: column });
+  // Dropping a card onto Rehab or Out of Service changes its STATUS
+  // rather than its assignment — the resource's actual division is
+  // preserved (not overwritten with the literal string "Rehab") so it
+  // can return to the same place once it's back. Dropping onto a real
+  // division column reassigns it there as before, and if it was
+  // previously in Rehab/Out of Service, also restores its status back
+  // to Staging — there's no other "active" status left to return it
+  // to, now that Assigned/Working don't exist as separate stages.
+  const moveResourceToColumn = (id, column) => {
+    if (column === "Rehab" || column === "Out of Service") {
+      moveResourceStatus(id, column);
+      return;
+    }
+    const current = resources.find(r => r.id === id);
+    const wasInSpecialStatus = current && (current.status === "Rehab" || current.status === "Out of Service");
+    updateResource(id, {
+      assignment: column,
+      ...(wasInSpecialStatus ? { status: "Staging", statusSince: nowISO(), history: [...current.history, { status: "Staging", at: nowISO() }] } : {}),
+    });
+  };
 
   const columnAt = (x, y) => {
     const el = document.elementFromPoint(x, y);
@@ -1324,7 +1368,7 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
       if (d && commit) {
         const target = columnAt(e.clientX, e.clientY);
         const current = resources.find(r => r.id === d.id);
-        if (target && current && target !== columnFor(current)) moveResourceAssignment(d.id, target);
+        if (target && current && target !== columnFor(current)) moveResourceToColumn(d.id, target);
       }
       return null;
     });
