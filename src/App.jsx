@@ -38,7 +38,21 @@ L.Icon.Default.mergeOptions({
    status colors, monospace for all time/ID data.
    ============================================================ */
 
-const STATUS_FLOW = ["Staging", "Assigned", "Working", "Rehab", "Out of Service", "Released"];
+// "Assigned" and "Working" were removed as their own stages — once a
+// resource has a specific Task set (see the Task field on check-in),
+// that itself conveys "actively doing something," making a separate
+// Kanban column for it redundant. See normalizeResourceStatus below
+// for how any resource still saved with one of those old statuses
+// gets handled so it doesn't just disappear from the board.
+const STATUS_FLOW = ["Staging", "Rehab", "Out of Service", "Released"];
+// A resource saved with "Assigned" or "Working" from before this
+// change existed would otherwise have no matching column to render
+// in at all — silently vanishing from the board is worse than
+// reclassifying it, so anything in one of those retired statuses
+// falls back to Staging instead.
+function normalizeResourceStatus(status) {
+  return STATUS_FLOW.includes(status) ? status : "Staging";
+}
 const STATUS_COLOR = {
   Staging: COLORS.amber,
   Assigned: COLORS.blue,
@@ -855,6 +869,7 @@ function ManageResourcesModal({
   departments, onRenameDept, onDeleteDept, onReorderDept, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, onAddDepartment, onAddUnitUnderDepartment,
   assignments, onRenameAssignment, onDeleteAssignment, onReorderAssignment, onAddAssignment,
   resourceKinds, onRenameKind, onDeleteKind, onReorderKind, onAddKind,
+  tasks, onRenameTask, onDeleteTask, onReorderTask, onAddTask,
   onClose, onBack,
 }) {
   const [subTab, setSubTab] = useState("departments"); // departments | assignments | kinds
@@ -879,6 +894,7 @@ function ManageResourcesModal({
     { k: "departments", label: "Departments & Units" },
     { k: "assignments", label: "Assignments" },
     { k: "kinds", label: "Resource Types" },
+    { k: "tasks", label: "Tasks" },
   ];
 
   return (
@@ -985,23 +1001,34 @@ function ManageResourcesModal({
               addLabel="Add Resource Type" addPlaceholder="New resource type" emptyLabel="None yet." />
           </>
         )}
+
+        {subTab === "tasks" && (
+          <>
+            <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
+              Edit a name and click away (or press Enter) to rename it. Use the arrows to reorder. This is the list shown in the Task dropdown when checking in a resource.
+            </div>
+            <FlatListManager
+              items={tasks} onRename={onRenameTask} onDelete={onDeleteTask} onReorder={onReorderTask} onAdd={onAddTask}
+              addLabel="Add Task" addPlaceholder="New task" emptyLabel="None yet." />
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets }) {
-  const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "" });
+function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset }) {
+  const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "", task: "" });
   const [deptId, setDeptId] = useState("");
-  const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment"
+  const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
   const [newValue, setNewValue] = useState("");
 
   const selectedDept = departments.find(d => d.id === deptId) || null;
 
   const submit = () => {
     if (!f.label.trim()) return;
-    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
-    setF({ label: "", kind: f.kind, personnel: 1, assignment: "" });
+    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, task: f.task, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
+    setF({ label: "", kind: f.kind, personnel: 1, assignment: "", task: "" });
   };
 
   const startAdding = (field) => { setAddingField(field); setNewValue(""); };
@@ -1015,6 +1042,9 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
     } else if (addingField === "unit") {
       onAddUnitUnderDepartment(deptId, name);
       setF(prev => ({ ...prev, label: name }));
+    } else if (addingField === "task") {
+      onSaveTaskPreset(name);
+      setF(prev => ({ ...prev, task: name }));
     } else {
       onSaveAssignmentPreset(name);
       setF(prev => ({ ...prev, assignment: name }));
@@ -1088,6 +1118,25 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
           </Select>
         )}
       </Field>
+      <Field label="Task">
+        {addingField === "task" ? (
+          <div style={{ display: "flex", gap: 4 }}>
+            <TextInput autoFocus value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="New task" style={{ width: 150 }}
+              onKeyDown={e => { if (e.key === "Enter") confirmAdd(); if (e.key === "Escape") setAddingField(null); }} />
+            <Btn kind="solid" onClick={confirmAdd} style={{ padding: "6px 9px", fontSize: 12 }}>Add</Btn>
+            <button onClick={() => setAddingField(null)} title="Cancel" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ) : (
+          <Select value={f.task} onChange={e => {
+            if (e.target.value === "__add_new__") startAdding("task");
+            else setF({ ...f, task: e.target.value });
+          }} style={{ width: 180 }}>
+            <option value="">Select task...</option>
+            {taskPresets.map(t => <option key={t} value={t}>{t}</option>)}
+            <option value="__add_new__">+ Add Task</option>
+          </Select>
+        )}
+      </Field>
       <Btn kind="solid" icon={Plus} onClick={submit}>Check In</Btn>
     </div>
   );
@@ -1121,7 +1170,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
         </div>
         <button onClick={() => onRemove(r.id)} title="Remove" style={{ background: "none", border: "none", color: COLORS.faint, cursor: "pointer" }}><X size={13} /></button>
       </div>
-      {r.assignment && <div style={{ fontSize: 11.5, color: COLORS.amber, marginTop: 4 }}>→ {r.assignment}</div>}
+      {r.task && <div style={{ fontSize: 11.5, color: COLORS.amber, marginTop: 4 }}>→ {r.task}</div>}
       {prior && (
         <div style={{ fontSize: 10.5, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", marginTop: 6 }}>
           {prior.status} before rehab: {fmtDuration(prior.ms)}
@@ -1133,6 +1182,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
       {editing ? (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
           <TextInput placeholder="Assignment / Division" defaultValue={r.assignment} onBlur={e => onUpdate(r.id, { assignment: e.target.value })} />
+          <TextInput placeholder="Task" defaultValue={r.task} onBlur={e => onUpdate(r.id, { task: e.target.value })} />
           <TextArea placeholder="Notes" defaultValue={r.notes} onBlur={e => onUpdate(r.id, { notes: e.target.value })} style={{ minHeight: 44 }} />
           <Btn kind="subtle" onClick={() => setEditing(false)}>Done</Btn>
         </div>
@@ -1149,7 +1199,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources }) {
+function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1193,7 +1243,7 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
       <Panel title="Check In Resource" icon={Truck} right={
         <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
       }>
-        <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} />
+        <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUS_FLOW.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         {STATUS_FLOW.map(status => {
@@ -5516,7 +5566,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [] });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], tasks: [] });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -5586,7 +5636,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // saved keeps showing up as a suggestion, just alongside the
       // new per-type categories instead of being the only list.
       const objectivesByType = p.objectivesByType || (p.objectives && p.objectives.length > 0 ? { General: p.objectives } : {});
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType });
+      const tasks = p.tasks || [];
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, tasks });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -5746,6 +5797,28 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setPresets(next);
     savePresets(next);
   };
+  const saveTaskPreset = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed || presets.tasks.includes(trimmed)) return;
+    const next = { ...presets, tasks: [...presets.tasks, trimmed] };
+    setPresets(next);
+    savePresets(next);
+  };
+  const renameTaskPreset = (oldName, newName) => {
+    const next = { ...presets, tasks: presets.tasks.map(t => t === oldName ? newName : t) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const deleteTaskPreset = (name) => {
+    const next = { ...presets, tasks: presets.tasks.filter(t => t !== name) };
+    setPresets(next);
+    savePresets(next);
+  };
+  const reorderTaskPresets = (newTasks) => {
+    const next = { ...presets, tasks: newTasks };
+    setPresets(next);
+    savePresets(next);
+  };
   const addResourceKind = (name) => {
     const trimmed = name.trim();
     if (!trimmed || presets.resourceKinds.includes(trimmed)) return;
@@ -5833,7 +5906,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     // autosave cycle is not a real edit, skip it."
     suppressNextAutosave.current = true;
     setIncident(normalizeIncident(blob.incident));
-    setResources(blob.resources || []);
+    setResources((blob.resources || []).map(r => ({ ...r, status: normalizeResourceStatus(r.status) })));
     setOrg(normalizeOrg(blob.org));
     setComms(normalizeComms(blob.comms));
     setSafety(blob.safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
@@ -6061,6 +6134,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
                 onOpenManageResources={() => setShowManageResourcesAuth(true)}
+                taskPresets={presets.tasks} onSaveTaskPreset={saveTaskPreset}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "weather" && <TabWeather />}
@@ -6160,6 +6234,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onReorderAssignment={reorderAssignmentPresets} onAddAssignment={saveAssignmentPreset}
           resourceKinds={presets.resourceKinds} onRenameKind={renameResourceKind} onDeleteKind={deleteResourceKind}
           onReorderKind={reorderResourceKinds} onAddKind={addResourceKind}
+          tasks={presets.tasks} onRenameTask={renameTaskPreset} onDeleteTask={deleteTaskPreset}
+          onReorderTask={reorderTaskPresets} onAddTask={saveTaskPreset}
           onClose={() => setShowManageResources(false)}
           onBack={manageResourcesFromAdmin ? () => { setShowManageResources(false); setShowAdminMenu(true); } : undefined}
         />
