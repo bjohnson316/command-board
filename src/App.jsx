@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Radio, Truck, HeartPulse, ClipboardList, Users, Save,
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
-  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical,
+  FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical, GripHorizontal,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
   Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown, ChevronLeft
 } from "lucide-react";
@@ -62,12 +62,9 @@ const STATUS_COLOR = {
 // Deterministic color per assignment/division column, cycling by
 // position — same idea as incidentTypeColor further down, since
 // assignments are a user-managed, reorderable list with no fixed
-// per-entry color of their own. "Unassigned" always gets a muted,
-// de-emphasized color rather than cycling in, since it's a catch-all
-// bucket rather than an actual division.
+// per-entry color of their own.
 const ASSIGNMENT_COLOR_PALETTE = [COLORS.amber, COLORS.teal, COLORS.blue, "#8B5CF6", COLORS.orange, COLORS.red];
 function assignmentColumnColor(assignment, columns) {
-  if (assignment === "Unassigned") return COLORS.faint;
   const idx = columns.indexOf(assignment);
   return idx === -1 ? COLORS.slate : ASSIGNMENT_COLOR_PALETTE[idx % ASSIGNMENT_COLOR_PALETTE.length];
 }
@@ -76,13 +73,24 @@ function assignmentColumnColor(assignment, columns) {
 // which columns exist and in what order — a new division shows up in
 // both places the moment a resource uses it, and neither can drift
 // out of sync with the other since they run the exact same logic.
-function deriveAssignmentColumns(resources, assignmentPresets) {
+// No catch-all "Unassigned" column — every resource must be given a
+// real Assignment/Division at check-in (enforced in ResourceForm) so
+// nothing can end up with nowhere to be displayed.
+// customOrder is the incident's own saved column arrangement from
+// dragging columns to rearrange them — anything in it that still
+// corresponds to a real column keeps that position; anything new
+// (e.g. a division nobody had used yet when the order was last saved)
+// is appended at the end rather than silently dropped.
+function deriveAssignmentColumns(resources, assignmentPresets, customOrder) {
   const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
-  const orderedAssignments = [
+  const defaultColumns = [
     ...assignmentPresets.filter(a => usedAssignments.includes(a)),
     ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
   ];
-  return ["Unassigned", ...orderedAssignments];
+  if (!customOrder || customOrder.length === 0) return defaultColumns;
+  const known = customOrder.filter(c => defaultColumns.includes(c));
+  const newOnes = defaultColumns.filter(c => !customOrder.includes(c));
+  return [...known, ...newOnes];
 }
 const INCIDENT_TYPES = [
   { v: "Structure Fire", c: COLORS.red },
@@ -573,7 +581,7 @@ function Panel({ title, icon: Icon, right, children, style }) {
 /* ============================================================
    TAB: ICS-201 INCIDENT BRIEFING
    ============================================================ */
-function Tab201({ incident, setIncident, resources, incidentTypePresets, objectivesByType, onAddObjective, assignmentPresets }) {
+function Tab201({ incident, setIncident, resources, incidentTypePresets, objectivesByType, onAddObjective, assignmentPresets, resourceColumnOrder }) {
   const [weatherStatus, setWeatherStatus] = useState(""); // "", "loading", or an error message
   const fetchCurrentWeather = () => {
     if (!navigator.geolocation) { setWeatherStatus("This device/browser doesn't support GPS location."); return; }
@@ -640,7 +648,7 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
   // by Assignment/Division rather than status — this summary follows
   // suit so the two never show conflicting pictures of where
   // resources currently stand.
-  const assignmentColumns = deriveAssignmentColumns(resources, assignmentPresets);
+  const assignmentColumns = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder);
   const columnFor = (r) => r.assignment || "Unassigned";
   const counts = assignmentColumns.map(col => ({ column: col, n: resources.filter(r => columnFor(r) === col).length }));
 
@@ -786,7 +794,7 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
 // approach already used for the Resource Board columns. Reorders live
 // as you drag over other rows, then commits the final order on release
 // via onReorderFull(newFullArray), rather than one write per swap.
-function DragReorderList({ items, keyFn, onReorderFull, renderItem }) {
+function DragReorderList({ items, keyFn, onReorderFull, renderItem, axis = "vertical" }) {
   const [dragKey, setDragKey] = useState(null);
   const [liveOrder, setLiveOrder] = useState(items);
   const itemRefs = useRef({});
@@ -803,14 +811,23 @@ function DragReorderList({ items, keyFn, onReorderFull, renderItem }) {
       if (idx === -1) return;
       // insertBeforeIdx = the position, in the ORIGINAL (pre-removal)
       // array, before which the dragged item should land — found by
-      // the first row whose midpoint the pointer is above. Defaults to
-      // the very end if the pointer is below every row.
+      // the first row/column whose midpoint the pointer is past.
+      // Defaults to the very end if the pointer is past every one.
+      // axis picks which coordinate and edge to compare against —
+      // vertical (the original, default behavior) compares clientY
+      // against each row's vertical midpoint; horizontal compares
+      // clientX against each column's horizontal midpoint instead,
+      // added specifically for reordering the Resource Board's
+      // Assignment/Division columns left-to-right.
       let insertBeforeIdx = order.length;
       for (let i = 0; i < order.length; i++) {
         const el = itemRefs.current[keyFn(order[i])];
         if (!el) continue;
         const rect = el.getBoundingClientRect();
-        if (e.clientY < rect.top + rect.height / 2) { insertBeforeIdx = i; break; }
+        const isPastMidpoint = axis === "horizontal"
+          ? e.clientX < rect.left + rect.width / 2
+          : e.clientY < rect.top + rect.height / 2;
+        if (isPastMidpoint) { insertBeforeIdx = i; break; }
       }
       // Removing the dragged item first shifts every index after it
       // down by one — so if the target position is after the source,
@@ -1051,11 +1068,19 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   const [deptId, setDeptId] = useState("");
   const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
   const [newValue, setNewValue] = useState("");
+  const [checkInError, setCheckInError] = useState("");
 
   const selectedDept = departments.find(d => d.id === deptId) || null;
 
   const submit = () => {
-    if (!f.label.trim()) return;
+    // Assignment/Division is required (not just recommended) now that
+    // the board has no catch-all "Unassigned" column left — a
+    // resource checked in without one would have nowhere on the board
+    // to actually appear, silently going unaccounted for rather than
+    // just looking untidy.
+    if (!f.label.trim()) { setCheckInError("Resource name is required."); return; }
+    if (!f.assignment) { setCheckInError("Assignment/Division is required to check in a resource."); return; }
+    setCheckInError("");
     onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, task: f.task, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "", task: "" });
   };
@@ -1083,6 +1108,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   };
 
   return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
       <Field label="Department">
         {addingField === "department" ? (
@@ -1168,6 +1194,8 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
       </Field>
       <Btn kind="solid" icon={Plus} onClick={submit}>Check In</Btn>
     </div>
+    {checkInError && <div style={{ fontSize: 12.5, color: COLORS.dangerText }}>{checkInError}</div>}
+    </div>
   );
 }
 
@@ -1228,7 +1256,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset }) {
+function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1247,9 +1275,15 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // yet. See deriveAssignmentColumns for the shared ordering logic
   // (also used by the Tactical Worksheet's status summary, so both
   // stay in sync).
-  const columns = deriveAssignmentColumns(resources, assignmentPresets);
+  const columns = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder);
   const columnFor = (r) => r.assignment || "Unassigned";
-  const moveResourceAssignment = (id, column) => updateResource(id, { assignment: column === "Unassigned" ? "" : column });
+  // "Unassigned" is no longer a special catch-all bucket — it's just
+  // whatever ordinary column name a legacy resource without a real
+  // division happened to get migrated to (see the load logic in
+  // AppInner), so dropping a card on it sets that literal value like
+  // any other column, rather than clearing the assignment back to
+  // empty the way it used to when "Unassigned" meant "no division."
+  const moveResourceAssignment = (id, column) => updateResource(id, { assignment: column });
 
   const columnAt = (x, y) => {
     const el = document.elementFromPoint(x, y);
@@ -1286,18 +1320,21 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
         <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
-        {columns.map(col => {
+        <DragReorderList items={columns} keyFn={col => col} onReorderFull={setResourceColumnOrder} axis="horizontal" renderItem={(col, i, colDragHandleProps) => {
           const items = resources.filter(r => columnFor(r) === col);
           const color = assignmentColumnColor(col, columns);
           const isOver = drag && drag.overColumn === col && drag.id && columnFor(resources.find(r => r.id === drag.id) || {}) !== col;
           return (
-            <div key={col} data-column-assignment={col} style={{
+            <div data-column-assignment={col} style={{
               background: COLORS.panel, border: `1px solid ${isOver ? color : COLORS.line}`,
               borderTop: `3px solid ${color}`, borderRadius: 6, padding: 10, minHeight: 200,
               boxShadow: isOver ? `0 0 0 2px ${color}` : "none", transition: "box-shadow 0.1s",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 12.5 }}>{col}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span {...colDragHandleProps} title="Drag to reorder columns" style={{ ...colDragHandleProps.style, color: COLORS.faint, display: "flex" }}><GripHorizontal size={14} /></span>
+                  <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 12.5 }}>{col}</span>
+                </span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.muted }}>{items.length}</span>
               </div>
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
@@ -1314,7 +1351,7 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
               ))}
             </div>
           );
-        })}
+        }} />
       </div>
       {drag && draggingResource && (
         <div style={{
@@ -5618,6 +5655,11 @@ function AppInner({ onLock, theme, toggleTheme }) {
 
   const [incident, setIncident] = useState(blankIncident());
   const [resources, setResources] = useState([]);
+  // Persisted per-incident (not a global preset) since different
+  // incidents may reasonably want their Resource Board divisions
+  // arranged in a different order — saved/loaded/autosaved alongside
+  // resources itself, the exact same way.
+  const [resourceColumnOrder, setResourceColumnOrder] = useState([]);
   const [org, setOrg] = useState({ positions: {}, divisions: [] });
   const [comms, setComms] = useState(defaultComms());
   const [safety, setSafety] = useState({ opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
@@ -5947,7 +5989,18 @@ function AppInner({ onLock, theme, toggleTheme }) {
     // autosave cycle is not a real edit, skip it."
     suppressNextAutosave.current = true;
     setIncident(normalizeIncident(blob.incident));
-    setResources((blob.resources || []).map(r => ({ ...r, status: normalizeResourceStatus(r.status) })));
+    // Assignment/Division is now required at check-in going forward
+    // (see ResourceForm), but that doesn't help anything already
+    // saved from before this change existed — a resource with a
+    // blank assignment would otherwise have no column left to appear
+    // in at all now that there's no catch-all "Unassigned" column.
+    // Defaulting it to the literal string "Unassigned" here means it
+    // naturally creates that column again for as long as any such
+    // resource exists (same dynamic-column logic as any real
+    // division), and that column just as naturally disappears again
+    // once every one of them has been given a real division.
+    setResources((blob.resources || []).map(r => ({ ...r, status: normalizeResourceStatus(r.status), assignment: r.assignment || "Unassigned" })));
+    setResourceColumnOrder(blob.resourceColumnOrder || []);
     setOrg(normalizeOrg(blob.org));
     setComms(normalizeComms(blob.comms));
     setSafety(blob.safety || { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
@@ -5986,7 +6039,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const updatedAt = nowISO();
-      const blob = { incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData: JSON.stringify(mapData), updatedAt };
+      const blob = { incident, resources, resourceColumnOrder, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData: JSON.stringify(mapData), updatedAt };
       const ok = await saveIncidentBlob(incident.id, blob);
       const meta = { id: incident.id, name: incident.name, type: incident.type, savedAt: updatedAt };
       const nextIndex = [meta, ...index.filter(i => i.id !== incident.id)];
@@ -5998,7 +6051,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     }, 900);
     return () => clearTimeout(saveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident, resources, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, ready, incidentLoaded]);
+  }, [incident, resources, resourceColumnOrder, org, comms, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, ready, incidentLoaded]);
 
   // real-time: subscribe to this incident's Firestore doc so other
   // users' changes appear here immediately, no polling needed.
@@ -6015,7 +6068,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   }, [ready, incidentLoaded, incident.id]);
 
   const startNew = () => {
-    applyBlob({ incident: blankIncident(), resources: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
+    applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
     setAttachments([]);
     setIncidentLoaded(true);
     setShowLib(false);
@@ -6165,7 +6218,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <div style={{ color: COLORS.muted, padding: 40, textAlign: "center" }}>Loading…</div>
           ) : (
             <>
-              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} assignmentPresets={presets.assignments} />}
+              {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
@@ -6176,6 +6229,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
                 onOpenManageResources={() => setShowManageResourcesAuth(true)}
                 taskPresets={presets.tasks} onSaveTaskPreset={saveTaskPreset}
+                resourceColumnOrder={resourceColumnOrder} setResourceColumnOrder={setResourceColumnOrder}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "weather" && <TabWeather />}
