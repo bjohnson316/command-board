@@ -45,15 +45,33 @@ L.Icon.Default.mergeOptions({
 // for how any resource still saved with one of those old statuses
 // gets handled so it doesn't just disappear from the board.
 const STATUS_FLOW = ["Staging", "Rehab", "Out of Service", "Released"];
+// The default status for a resource sitting normally in its
+// division — distinct from STATUS_FLOW's four values, which are now
+// all dynamic "holding" columns a resource is explicitly moved into
+// and back out of (via the dropdown or by dragging). Without this
+// distinction, a freshly checked-in resource — whose status starts as
+// "Staging" purely as a default value — would be indistinguishable
+// from one explicitly moved to the Staging column later, and would
+// incorrectly land there instead of its division.
+const ACTIVE_STATUS = "Active";
 // A resource saved with "Assigned" or "Working" from before this
 // change existed would otherwise have no matching column to render
 // in at all — silently vanishing from the board is worse than
 // reclassifying it, so anything in one of those retired statuses
-// falls back to Staging instead.
+// falls back to the normal Active state instead. Critically, this
+// also covers plain "Staging" — before this feature existed, every
+// resource simply defaulted to status "Staging" at check-in with no
+// separate "deliberately moved to the Staging column" concept at all,
+// so anything saved that way is migrated to Active rather than
+// reinterpreted as an explicit move into the new Staging column,
+// which would otherwise suddenly relocate every already-checked-in
+// resource on an in-progress incident the instant this update loads.
 function normalizeResourceStatus(status) {
-  return STATUS_FLOW.includes(status) ? status : "Staging";
+  if (status === "Staging") return ACTIVE_STATUS;
+  return STATUS_FLOW.includes(status) ? status : ACTIVE_STATUS;
 }
 const STATUS_COLOR = {
+  [ACTIVE_STATUS]: COLORS.blue,
   Staging: COLORS.amber,
   Rehab: COLORS.teal,
   "Out of Service": COLORS.slate,
@@ -111,28 +129,35 @@ function mergeObjectivesIntoList(current, toAdd) {
 // the single source of truth for that rule, used both to decide which
 // column a resource's card renders in and to decide which columns
 // exist at all (see deriveAssignmentColumns below), so the two can
-// never disagree with each other.
+// never disagree with each other. All four STATUS_FLOW values behave
+// this way now (not just Rehab/Out of Service) — ACTIVE_STATUS is
+// deliberately excluded from STATUS_FLOW so a resource sitting
+// normally in its division (the common case) is never mistaken for
+// one explicitly parked in one of these holding columns.
 function columnFor(r) {
-  if (r.status === "Rehab" || r.status === "Out of Service") return r.status;
+  if (STATUS_FLOW.includes(r.status)) return r.status;
   return r.assignment || "Unassigned";
 }
 function deriveAssignmentColumns(resources, assignmentPresets, customOrder) {
-  // Only resources NOT currently pulled into Rehab/Out of Service
-  // count toward which assignment columns exist — a division with
-  // every one of its resources temporarily in Rehab shouldn't still
-  // show as its own (now-empty) column at the same time Rehab exists.
-  const activeResources = resources.filter(r => r.status !== "Rehab" && r.status !== "Out of Service");
-  const usedAssignments = [...new Set(activeResources.map(r => r.assignment).filter(Boolean))];
+  // Division columns persist for as long as ANY resource — regardless
+  // of its CURRENT status — has that division as its assignment, not
+  // just ones currently displayed there. A resource temporarily
+  // parked in Rehab still counts toward keeping its division's column
+  // alive, specifically so that column still exists to drag it back
+  // into later, even if it was the only resource in that division.
+  const usedAssignments = [...new Set(resources.map(r => r.assignment).filter(Boolean))];
   const defaultColumns = [
     ...assignmentPresets.filter(a => usedAssignments.includes(a)),
     ...usedAssignments.filter(a => !assignmentPresets.includes(a)),
   ];
-  // Rehab/Out of Service are appended after the real division columns
-  // — they're temporary holding columns, not divisions, and only
-  // exist at all while at least one resource currently has that
-  // status, disappearing again the moment the last one leaves it.
-  if (resources.some(r => r.status === "Rehab")) defaultColumns.push("Rehab");
-  if (resources.some(r => r.status === "Out of Service")) defaultColumns.push("Out of Service");
+  // Status columns are the opposite of division columns — temporary
+  // holding areas that only exist while at least one resource is
+  // CURRENTLY in that status, appearing the moment a unit is
+  // explicitly moved there (via the dropdown or by dragging) and
+  // disappearing again once the last one leaves it.
+  STATUS_FLOW.forEach(status => {
+    if (resources.some(r => r.status === status)) defaultColumns.push(status);
+  });
   if (!customOrder || customOrder.length === 0) return defaultColumns;
   const known = customOrder.filter(c => defaultColumns.includes(c));
   const newOnes = defaultColumns.filter(c => !customOrder.includes(c));
@@ -1127,7 +1152,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
     if (!f.label.trim()) { setCheckInError("Resource name is required."); return; }
     if (!f.assignment) { setCheckInError("Assignment/Division is required to check in a resource."); return; }
     setCheckInError("");
-    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, task: f.task, status: "Staging", statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: "Staging", at: nowISO() }] });
+    onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, task: f.task, status: ACTIVE_STATUS, statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: ACTIVE_STATUS, at: nowISO() }] });
     setF({ label: "", kind: f.kind, personnel: 1, assignment: "", task: "" });
   };
 
@@ -1248,6 +1273,11 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
 function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging }) {
   const [editing, setEditing] = useState(false);
   const nextOptions = STATUS_FLOW.filter(s => s !== r.status);
+  // When currently parked in one of the four status columns, offer an
+  // explicit way back to its division too — not just via drag, since
+  // "moved out of Staging/Rehab/Out of Service/Released" should be
+  // just as reachable as moving into one of them in the first place.
+  const canReturnToDivision = STATUS_FLOW.includes(r.status) && r.assignment;
   // Once released, the timer stops accruing — freeze it at the moment
   // of release instead of continuing to tick against real time.
   const cardNow = r.status === "Released" ? new Date(r.statusSince).getTime() : now;
@@ -1293,6 +1323,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
         <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
           <Select value="" onChange={e => { if (e.target.value) onMove(r.id, e.target.value); }} style={{ fontSize: 12, padding: "5px 7px" }}>
             <option value="">Move to...</option>
+            {canReturnToDivision && <option value={r.assignment}>Return to {r.assignment}</option>}
             {nextOptions.map(s => <option key={s} value={s}>{s}</option>)}
           </Select>
           <Btn kind="ghost" onClick={() => setEditing(true)} style={{ padding: "5px 8px", fontSize: 12 }}>Edit</Btn>
@@ -1328,24 +1359,25 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   // AppInner), so dropping a card on it sets that literal value like
   // any other column, rather than clearing the assignment back to
   // empty the way it used to when "Unassigned" meant "no division."
-  // Dropping a card onto Rehab or Out of Service changes its STATUS
-  // rather than its assignment — the resource's actual division is
-  // preserved (not overwritten with the literal string "Rehab") so it
-  // can return to the same place once it's back. Dropping onto a real
-  // division column reassigns it there as before, and if it was
-  // previously in Rehab/Out of Service, also restores its status back
-  // to Staging — there's no other "active" status left to return it
-  // to, now that Assigned/Working don't exist as separate stages.
+  // Dropping a card onto any of the four status columns (Staging,
+  // Rehab, Out of Service, Released) changes its STATUS rather than
+  // its assignment — the resource's actual division is preserved
+  // (never overwritten with the status name itself) so it can return
+  // to the exact same place once it's back. Dropping onto a real
+  // division column reassigns it there, and if it was previously
+  // parked in one of the four status columns, also resets its status
+  // back to normal (ACTIVE_STATUS) — there's nothing else for it to
+  // return to.
   const moveResourceToColumn = (id, column) => {
-    if (column === "Rehab" || column === "Out of Service") {
+    if (STATUS_FLOW.includes(column)) {
       moveResourceStatus(id, column);
       return;
     }
     const current = resources.find(r => r.id === id);
-    const wasInSpecialStatus = current && (current.status === "Rehab" || current.status === "Out of Service");
+    const wasInStatusColumn = current && STATUS_FLOW.includes(current.status);
     updateResource(id, {
       assignment: column,
-      ...(wasInSpecialStatus ? { status: "Staging", statusSince: nowISO(), history: [...current.history, { status: "Staging", at: nowISO() }] } : {}),
+      ...(wasInStatusColumn ? { status: ACTIVE_STATUS, statusSince: nowISO(), history: [...current.history, { status: ACTIVE_STATUS, at: nowISO() }] } : {}),
     });
   };
 
@@ -1403,7 +1435,7 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
               </div>
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
               {items.map(r => (
-                <ResourceCard key={r.id} r={r} onMove={moveResourceStatus} onUpdate={updateResource} onRemove={removeResource} now={now}
+                <ResourceCard key={r.id} r={r} onMove={moveResourceToColumn} onUpdate={updateResource} onRemove={removeResource} now={now}
                   isDragging={drag && drag.id === r.id}
                   dragProps={{
                     onPointerDown: (e) => handlePointerDown(r, e),
