@@ -353,6 +353,14 @@ function blankIncident() {
     situation: "",
     safetyMessage: "",
     objectives: [""],
+    // Keyed by the objective's own text rather than an index or ID,
+    // since objectives are plain strings everywhere else in the app
+    // (Tab201, Tab201Full, the PDF export, the merge/auto-populate
+    // logic) — adding completion tracking this way needed zero
+    // changes to any of that already-working code. Editing an
+    // objective's text is effectively treated as a new objective for
+    // completion purposes, which is an acceptable, minor trade-off.
+    objectivesCompleted: {},
     actionsLog: [],
     resourceOrders: [],
     mapSketch: "",
@@ -381,6 +389,7 @@ function normalizeIncident(inc) {
     actionsLog: [], resourceOrders: [], mapSketch: "",
     strategyOffensive: false, strategyDefensive: false, strategyTransitional: false, strategyInvestigative: false,
     pausedElapsedMs: 0,
+    objectivesCompleted: {},
     ...migrated,
   };
 }
@@ -1333,7 +1342,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder }) {
+function TabResources({ resources, setResources, now, incident, setIncident, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1407,14 +1416,38 @@ function TabResources({ resources, setResources, now, departments, onAddDepartme
   };
 
   const draggingResource = drag ? resources.find(r => r.id === drag.id) : null;
+  // Keyed by the objective's own text (see blankIncident) rather than
+  // needing any change to how objectives themselves are stored.
+  const toggleObjectiveComplete = (text) => setIncident({ ...incident, objectivesCompleted: { ...incident.objectivesCompleted, [text]: !incident.objectivesCompleted[text] } });
+  const realObjectives = incident.objectives.filter(o => o.trim());
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Panel title="Check In Resource" icon={Truck} right={
-        <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
-      }>
-        <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
-      </Panel>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <Panel title="Check In Resource" icon={Truck} style={{ flex: "2 1 420px" }} right={
+          <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
+        }>
+          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
+        </Panel>
+        <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
+          {realObjectives.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: COLORS.faint }}>None set on the Tactical Worksheet yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {realObjectives.map((o, i) => {
+                const isComplete = !!incident.objectivesCompleted[o];
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <button onClick={() => toggleObjectiveComplete(o)} title={isComplete ? "Mark incomplete" : "Mark complete"}
+                      style={{ width: 14, height: 14, minWidth: 14, borderRadius: "50%", background: isComplete ? COLORS.teal : COLORS.red, border: "none", cursor: "pointer", padding: 0 }} />
+                    <span style={{ fontSize: 12.5, color: COLORS.text, textDecoration: isComplete ? "line-through" : "none", opacity: isComplete ? 0.6 : 1 }}>{o}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         <DragReorderList items={columns} keyFn={col => col} onReorderFull={setResourceColumnOrder} axis="horizontal" renderItem={(col, i, colDragHandleProps) => {
           const items = resources.filter(r => columnFor(r) === col);
@@ -6307,6 +6340,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <>
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
+                incident={incident} setIncident={setIncident}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
                 onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnits}
