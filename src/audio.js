@@ -104,12 +104,20 @@ function getAudioEl() {
 // Plays briefly then immediately pauses and rewinds — the standard
 // "unlock" pattern for autoplay policies, priming the element so it
 // can be started later programmatically without another gesture.
+// Muted to silence during this priming play specifically: this runs
+// on every tap anywhere in the app (see setupAudioResumeListeners),
+// including totally unrelated ones like checking off a PAR box, and
+// without muting it here that produced an audible "chirp" on every
+// single tap rather than only during a genuine Mayday.
 export function unlockAudioContext() {
   try {
     const el = getAudioEl();
+    const originalVolume = el.volume;
+    el.volume = 0;
+    const restore = () => { el.pause(); el.currentTime = 0; el.volume = originalVolume; };
     const p = el.play();
-    if (p && p.then) p.then(() => { el.pause(); el.currentTime = 0; }).catch(() => {});
-    else { el.pause(); el.currentTime = 0; }
+    if (p && p.then) p.then(restore).catch(restore);
+    else restore();
   } catch { /* unsupported — nothing to do */ }
 }
 
