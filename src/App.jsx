@@ -15,7 +15,7 @@ import {
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
 import PinGate, { refreshUnlockRecord } from "./PinGate.jsx";
-import { playMaydayTone, unlockAudioContext } from "./audio";
+import { playMaydayTone, unlockAudioContext, setupAudioResumeListeners } from "./audio";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
@@ -4195,6 +4195,18 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   L.push(...tableLines(["UNIT", "TYPE", "PERS", "STATUS", "ASSIGNMENT"], [70, 110, 45, 80, 220],
     resources.map(r => [r.label, r.kind, String(r.personnel), r.status, r.assignment]), "Resource Board Status"));
 
+  // parHistory is stored as part of the incident's own saved data
+  // (same place as resources, logs, etc.) — one entry per completed
+  // PAR or Mayday check, recorded when that session is closed out via
+  // "Complete PAR" / "All Clear — End Mayday".
+  L.push(...tableLines(["TYPE", "STARTED", "COMPLETED", "UNITS ACCOUNTED FOR"], [90, 130, 130, 200],
+    (incident.parHistory || []).map(p => [
+      p.type === "mayday" ? "MAYDAY" : "PAR",
+      fmtDateTimeShort(p.startedAt),
+      fmtDateTimeShort(p.completedAt),
+      `${p.checkedUnits} of ${p.totalUnits}`,
+    ]), "PAR / Mayday History"));
+
   const vitalsSegments = (r) => {
     const segs = [];
     if (r.bp) segs.push({ text: "BP ", bold: true }, { text: `${r.bp} `, bold: false });
@@ -5915,17 +5927,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // accidentally suppress a brand new one.
   const [alarmSilenced, setAlarmSilenced] = useState(false);
   const [parReminderDue, setParReminderDue] = useState(false);
-  // Covers the case where this device skipped the PIN screen entirely
-  // (auto-unlocked via the grace period — see PinGate.jsx), meaning
-  // unlockAudioContext was never called from there. This unlocks it
-  // on the very first tap/click anywhere in the app instead, as a
-  // safety net, so a remotely-triggered Mayday still has a real
-  // chance of playing audibly on this device.
-  useEffect(() => {
-    const handler = () => unlockAudioContext();
-    window.addEventListener("pointerdown", handler, { once: true });
-    return () => window.removeEventListener("pointerdown", handler);
-  }, []);
+  // Covers two gaps: (1) this device skipping the PIN screen entirely
+  // via the grace period (see PinGate.jsx), meaning
+  // unlockAudioContext was never called from there, and (2) iOS
+  // re-suspending an already-unlocked context whenever the tab loses
+  // focus/backgrounds — resuming opportunistically on every tap and
+  // on regaining visibility gives a remotely-triggered Mayday the
+  // best realistic chance of playing audibly on this device, though
+  // it can't fully overcome a genuinely locked/backgrounded phone
+  // (see the comments in audio.js for why).
+  useEffect(() => setupAudioResumeListeners(), []);
   const [org, setOrg] = useState({ positions: {}, divisions: [] });
   const [comms, setComms] = useState(defaultComms());
   const [safety, setSafety] = useState({ opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
