@@ -5286,7 +5286,6 @@ function ChangePinModal({ onClose, onBack }) {
     setStatus("saving");
     const nextHash = await sha256(next);
     await savePinConfig({ ...cfg, pinHash: nextHash });
-    localStorage.setItem("cb_unlocked_hash", nextHash);
     setStatus("done");
     setTimeout(onClose, 900);
   };

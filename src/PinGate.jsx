@@ -4,8 +4,6 @@ import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
 import { loadPinConfig, savePinConfig } from "./store";
 import { sha256 } from "./pin";
 
-const UNLOCK_KEY = "cb_unlocked_hash";
-
 const wrap = {
   minHeight: "100vh", background: COLORS.bg, color: COLORS.text,
   display: "flex", alignItems: "center", justifyContent: "center",
@@ -28,8 +26,13 @@ const btn = {
 };
 
 // Renders children once unlocked. Handles first-run PIN setup and
-// later PIN entry. The unlock is remembered on this device via
-// localStorage so people don't re-enter it every visit.
+// later PIN entry. The unlock is intentionally NOT persisted anywhere
+// (no localStorage/sessionStorage) — it lives purely in React state,
+// which is why it resets to locked on every full page load, whether
+// from an explicit refresh or the browser/tab being closed and
+// reopened. The trade-off: on iPad Safari specifically, backgrounding
+// this tab to use another app can cause Safari to reload it under
+// memory pressure, which will also re-lock it.
 export default function PinGate({ children }) {
   const [phase, setPhase] = useState("loading"); // loading | setup | locked | unlocked
   const [config, setConfig] = useState(null);
@@ -45,8 +48,7 @@ export default function PinGate({ children }) {
         setPhase("setup");
         return;
       }
-      const remembered = localStorage.getItem(UNLOCK_KEY);
-      setPhase(remembered === cfg.pinHash ? "unlocked" : "locked");
+      setPhase("locked");
     })();
   }, []);
 
@@ -56,7 +58,6 @@ export default function PinGate({ children }) {
     if (pin !== pin2) return setError("PINs don't match.");
     const pinHash = await sha256(pin);
     await savePinConfig({ pinHash });
-    localStorage.setItem(UNLOCK_KEY, pinHash);
     setPhase("unlocked");
   };
 
@@ -64,7 +65,6 @@ export default function PinGate({ children }) {
     setError("");
     const hash = await sha256(pin);
     if (hash === config.pinHash) {
-      localStorage.setItem(UNLOCK_KEY, hash);
       setPhase("unlocked");
     } else {
       setError("Incorrect PIN.");
@@ -77,7 +77,6 @@ export default function PinGate({ children }) {
   }
 
   const lock = () => {
-    localStorage.removeItem(UNLOCK_KEY);
     setPin("");
     setError("");
     setPhase("locked");
