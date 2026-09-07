@@ -1062,7 +1062,14 @@ function ParCheckModal({ mode, resources, parSession, onCheck, onComplete, onClo
           <Btn kind={isMayday ? "danger" : "solid"} onClick={onComplete} style={{ flex: 1, justifyContent: "center" }}>
             {isMayday ? "All Clear — End Mayday" : "Complete PAR"}
           </Btn>
-          <Btn kind="ghost" onClick={onClose}>Close</Btn>
+          {/* Mayday has no plain "Close" — closing it must go through
+              All Clear, which is what actually updates the shared
+              alert record. Without this, silencing the alarm by
+              taking PAR (a separate, local-only stop) could look
+              exactly like the Mayday being fully resolved, when the
+              underlying alert was actually still active and would
+              reopen the moment the incident was loaded again. */}
+          {!isMayday && <Btn kind="ghost" onClick={onClose}>Close</Btn>}
         </div>
       </div>
     </div>
@@ -6407,11 +6414,17 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // itself below, since the modal should stay open even after the
   // alarm has stopped playing. Resets alarmSilenced whenever a fresh
   // Mayday starts, so a silence from a past one can't suppress a new
-  // one.
+  // one. Just as importantly, this now also force-CLOSES the modal
+  // the moment maydayAlertActive is false — without this, an initial
+  // Firestore snapshot on reload that briefly reports stale cached
+  // data before the corrected one arrives could leave the modal stuck
+  // open with nothing left to ever close it again.
   useEffect(() => {
     if (maydayAlertActive) {
       setShowMaydayModal(true);
       setAlarmSilenced(false);
+    } else {
+      setShowMaydayModal(false);
     }
   }, [maydayAlertActive]);
 
