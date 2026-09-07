@@ -117,6 +117,27 @@ export function watchIndex(onChange) {
   });
 }
 
+// Mayday alerts — deliberately a completely separate document from
+// the main incident blob, in its own collection. The main incident
+// sync (see watchIncident's caller in App.jsx) intentionally waits out
+// any in-flight local edit before applying an incoming remote change,
+// to avoid clobbering someone's in-progress typing — that's the right
+// tradeoff for normal editing, but unacceptable for a life-safety
+// alert where every second matters. This path has no such guard: it's
+// its own listener, so a Mayday reaches every device immediately
+// regardless of what else that device's editor is doing.
+export async function triggerMaydayAlert(incidentId) {
+  await setDoc(doc(db, "icMayday", incidentId), { active: true, startedAt: new Date().toISOString(), _serverWrite: serverTimestamp() });
+}
+export async function clearMaydayAlert(incidentId) {
+  await setDoc(doc(db, "icMayday", incidentId), { active: false, startedAt: null, _serverWrite: serverTimestamp() });
+}
+export function watchMaydayAlert(incidentId, onChange) {
+  return onSnapshot(doc(db, "icMayday", incidentId), (snap) => {
+    onChange(snap.exists() ? snap.data() : { active: false, startedAt: null });
+  });
+}
+
 // Attachments — each one is its own document in a subcollection under
 // its incident (icIncidents/{id}/attachments/{attId}), NOT a field on
 // the incident blob itself. Firestore caps a document at 1MB total;

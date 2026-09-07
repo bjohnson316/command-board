@@ -9,6 +9,7 @@ import {
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
   deleteIncidentBlob, watchIncident, loadPinConfig, savePinConfig,
+  triggerMaydayAlert, clearMaydayAlert, watchMaydayAlert,
   loadPresets, savePresets,
   loadAttachments, saveAttachment, deleteAttachment, deleteAllAttachments,
 } from "./store";
@@ -69,6 +70,39 @@ const ACTIVE_STATUS = "Active";
 function normalizeResourceStatus(status) {
   if (status === "Staging") return ACTIVE_STATUS;
   return STATUS_FLOW.includes(status) ? status : ACTIVE_STATUS;
+}
+// A generated two-tone siren, not an audio file — avoids needing any
+// external asset, and works the same everywhere. Browsers generally
+// block audio from starting without a preceding user interaction on
+// the page; since triggering a Mayday IS a click, the device that
+// triggers it always plays correctly, but a device merely receiving
+// the alert remotely may have this silently blocked if nobody has
+// interacted with that tab recently — a real, unavoidable browser
+// limitation this feature can't fully guarantee around. The popup
+// itself still always appears regardless.
+function playMaydayTone() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beep = (freq, startTime, duration) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.3, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + duration + 0.02);
+    };
+    const now = ctx.currentTime;
+    for (let i = 0; i < 4; i++) {
+      beep(880, now + i * 0.4, 0.18);
+      beep(660, now + i * 0.4 + 0.2, 0.18);
+    }
+    setTimeout(() => ctx.close(), 2000);
+  } catch { /* Web Audio unsupported or blocked — the popup still shows regardless */ }
 }
 const STATUS_COLOR = {
   [ACTIVE_STATUS]: COLORS.blue,
@@ -361,6 +395,13 @@ function blankIncident() {
     // objective's text is effectively treated as a new objective for
     // completion purposes, which is an acceptable, minor trade-off.
     objectivesCompleted: {},
+    // parSession is the currently-active PAR or Mayday check-in event
+    // (null when none is in progress); lastParAt is when the most
+    // recent one was completed, used to drive the periodic PAR
+    // reminder.
+    parSession: null,
+    lastParAt: "",
+    parHistory: [],
     actionsLog: [],
     resourceOrders: [],
     mapSketch: "",
@@ -390,6 +431,9 @@ function normalizeIncident(inc) {
     strategyOffensive: false, strategyDefensive: false, strategyTransitional: false, strategyInvestigative: false,
     pausedElapsedMs: 0,
     objectivesCompleted: {},
+    parSession: null,
+    lastParAt: "",
+    parHistory: [],
     ...migrated,
   };
 }
@@ -991,6 +1035,67 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
 // Resource Types — organized as tabs rather than three separate
 // buttons/modals, since they're all "manage the resource picker" in
 // one place.
+// Shared by both the Mayday and PAR buttons — same "check off each
+// unit as it reports in, with a timestamp" structure, just different
+// severity styling and completion wording. Mayday additionally has an
+// active cross-device alert tied to it (see triggerMaydayAlert /
+// watchMaydayAlert in store.js) that this modal itself doesn't manage
+// directly — that's handled at the AppInner level, since a Mayday
+// needs to be visible regardless of which tab is currently open, not
+// just while the Resource Board happens to be showing.
+function ParCheckModal({ mode, resources, parSession, onCheck, onComplete, onClose }) {
+  const isMayday = mode === "mayday";
+  const accent = isMayday ? COLORS.red : COLORS.amber;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 95, padding: 16 }}>
+      <div style={{ background: COLORS.panel, border: `2px solid ${accent}`, borderRadius: 8, width: 560, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: isMayday ? 19 : 15, color: isMayday ? COLORS.red : COLORS.text, fontWeight: 700, marginBottom: 4 }}>
+          {isMayday ? "MAYDAY — Personnel Accountability Report" : "PAR Check"}
+        </div>
+        <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
+          Check off each unit as it reports in — the time is recorded automatically.
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Unit</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Assignment</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Task</th>
+              <th style={{ padding: "6px 8px", textAlign: "center" }}>PAR</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Time</th>
+            </tr></thead>
+            <tbody>
+              {resources.map(r => {
+                const checkedAt = parSession && parSession.checks ? parSession.checks[r.id] : null;
+                return (
+                  <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 600 }}>{r.label}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{r.assignment || "—"}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{r.task || "—"}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                      <input type="checkbox" checked={!!checkedAt} onChange={() => onCheck(r.id)} style={{ width: 18, height: 18 }} />
+                    </td>
+                    <td style={{ padding: "6px 8px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: checkedAt ? COLORS.teal : COLORS.faint }}>
+                      {checkedAt ? new Date(checkedAt).toLocaleTimeString() : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {resources.length === 0 && <div style={{ fontSize: 13, color: COLORS.faint, padding: "14px 2px" }}>No resources checked in yet.</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Btn kind={isMayday ? "danger" : "solid"} onClick={onComplete} style={{ flex: 1, justifyContent: "center" }}>
+            {isMayday ? "All Clear — End Mayday" : "Complete PAR"}
+          </Btn>
+          <Btn kind="ghost" onClick={onClose}>Close</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ManageResourcesModal({
   departments, onRenameDept, onDeleteDept, onReorderDept, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, onAddDepartment, onAddUnitUnderDepartment,
   assignments, onRenameAssignment, onDeleteAssignment, onReorderAssignment, onAddAssignment,
@@ -1342,7 +1447,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, incident, setIncident, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder }) {
+function TabResources({ resources, setResources, now, incident, setIncident, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1446,6 +1551,18 @@ function TabResources({ resources, setResources, now, incident, setIncident, dep
               })}
             </div>
           )}
+        </Panel>
+        <Panel title="Accountability" icon={AlertTriangle} style={{ flex: "0 0 180px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <button onClick={onTriggerMayday}
+              style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 6, padding: "16px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 17, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
+              Mayday
+            </button>
+            <button onClick={onStartPar}
+              style={{ background: COLORS.amber, color: "#191C1F", border: "none", borderRadius: 6, padding: "13px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 15, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
+              PAR
+            </button>
+          </div>
         </Panel>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
@@ -5249,7 +5366,7 @@ function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRen
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives, onManageParSettings }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -5263,7 +5380,34 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
           <Btn kind="ghost" icon={ClipboardList} onClick={onManageIncidentTypes} style={{ width: "100%", justifyContent: "center" }}>Manage Incident Types</Btn>
           <Btn kind="ghost" icon={Settings} onClick={onManageResources} style={{ width: "100%", justifyContent: "center" }}>Manage Resources</Btn>
           <Btn kind="ghost" icon={Star} onClick={onManageObjectives} style={{ width: "100%", justifyContent: "center" }}>Manage Objectives</Btn>
+          <Btn kind="ghost" icon={AlertTriangle} onClick={onManageParSettings} style={{ width: "100%", justifyContent: "center" }}>PAR / Mayday Settings</Btn>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// A single, focused setting rather than a full FlatListManager-style
+// modal, since there's only one value to manage here.
+function ParSettingsModal({ onClose, onBack, parIntervalMinutes, onSave }) {
+  const [value, setValue] = useState(String(parIntervalMinutes));
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 340, padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>PAR / Mayday Settings</span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <Field label="PAR Reminder Interval (minutes)">
+          <TextInput type="number" min="1" value={value} onChange={e => setValue(e.target.value)} />
+        </Field>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8, lineHeight: 1.5 }}>
+          A reminder pops up this often, counting from the last completed PAR, prompting a fresh accountability check.
+        </div>
+        <Btn kind="solid" onClick={() => { onSave(value); onClose(); }} style={{ width: "100%", justifyContent: "center", marginTop: 14 }}>Save</Btn>
       </div>
     </div>
   );
@@ -5761,10 +5905,11 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // when there's actually an Admin menu to go back to.
   const [manageResourcesFromAdmin, setManageResourcesFromAdmin] = useState(false);
   const [showManageObjectives, setShowManageObjectives] = useState(false);
+  const [showParSettings, setShowParSettings] = useState(false);
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], tasks: [] });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], tasks: [], parIntervalMinutes: 15 });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -5780,6 +5925,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // arranged in a different order — saved/loaded/autosaved alongside
   // resources itself, the exact same way.
   const [resourceColumnOrder, setResourceColumnOrder] = useState([]);
+  const [showMaydayModal, setShowMaydayModal] = useState(false);
+  const [showParModal, setShowParModal] = useState(false);
+  // Tracks the separate, dedicated cross-device Mayday alert (see
+  // triggerMaydayAlert/watchMaydayAlert in store.js) — distinct from
+  // showMaydayModal, since a remote Mayday needs to force the modal
+  // open (and the alarm playing) on this device even if this device
+  // isn't the one that triggered it.
+  const [maydayAlertActive, setMaydayAlertActive] = useState(false);
+  const maydayAudioCtxRef = useRef(null);
+  const [parReminderDue, setParReminderDue] = useState(false);
   const [org, setOrg] = useState({ positions: {}, divisions: [] });
   const [comms, setComms] = useState(defaultComms());
   const [safety, setSafety] = useState({ opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
@@ -5840,7 +5995,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // new per-type categories instead of being the only list.
       const objectivesByType = p.objectivesByType || (p.objectives && p.objectives.length > 0 ? { General: p.objectives } : {});
       const tasks = p.tasks || [];
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, tasks });
+      const parIntervalMinutes = p.parIntervalMinutes || 15;
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, tasks, parIntervalMinutes });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -6022,6 +6178,49 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setPresets(next);
     savePresets(next);
   };
+  const setParIntervalMinutes = (minutes) => {
+    const n = Math.max(1, Number(minutes) || 15);
+    const next = { ...presets, parIntervalMinutes: n };
+    setPresets(next);
+    savePresets(next);
+  };
+  // Starting a Mayday both updates the incident's own parSession
+  // (subject to the normal debounced save/sync — fine, since the
+  // urgent part is the separate alert below) and fires the dedicated,
+  // un-debounced cross-device alert so every other device reacts
+  // immediately regardless of what they're doing locally.
+  const startMayday = () => {
+    setIncident(prev => ({ ...prev, parSession: { type: "mayday", startedAt: nowISO(), checks: {} } }));
+    setShowMaydayModal(true);
+    if (incident.id) triggerMaydayAlert(incident.id).catch(() => console.error("Mayday alert failed to reach other devices — check Firestore rules include icMayday."));
+  };
+  const startPar = () => {
+    setIncident(prev => ({ ...prev, parSession: { type: "par", startedAt: nowISO(), checks: {} } }));
+    setShowParModal(true);
+  };
+  const toggleParCheck = (resourceId) => {
+    setIncident(prev => {
+      if (!prev.parSession) return prev;
+      const nextChecks = { ...prev.parSession.checks };
+      if (nextChecks[resourceId]) delete nextChecks[resourceId];
+      else nextChecks[resourceId] = nowISO();
+      return { ...prev, parSession: { ...prev.parSession, checks: nextChecks } };
+    });
+  };
+  const completeParSession = () => {
+    const session = incident.parSession;
+    const checkedCount = session ? Object.keys(session.checks).length : 0;
+    const entry = { id: uid(), type: session?.type || "par", startedAt: session?.startedAt || nowISO(), completedAt: nowISO(), totalUnits: resources.length, checkedUnits: checkedCount };
+    setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory] }));
+    setShowMaydayModal(false);
+    setShowParModal(false);
+    setParReminderDue(false);
+    if (session?.type === "mayday" && incident.id) clearMaydayAlert(incident.id).catch(() => console.error("Failed to clear the Mayday alert on other devices."));
+  };
+  const closeParModal = () => {
+    setShowMaydayModal(false);
+    setShowParModal(false);
+  };
   const addResourceKind = (name) => {
     const trimmed = name.trim();
     if (!trimmed || presets.resourceKinds.includes(trimmed)) return;
@@ -6187,6 +6386,53 @@ function AppInner({ onLock, theme, toggleTheme }) {
     return () => unsubscribe();
   }, [ready, incidentLoaded, incident.id]);
 
+  // Separate, dedicated subscription for the Mayday alert — bypasses
+  // the dirty-check above entirely (see triggerMaydayAlert/
+  // watchMaydayAlert in store.js) so a Mayday reaches every device
+  // instantly, regardless of which tab they're currently on or
+  // whether they have unsaved local edits pending.
+  useEffect(() => {
+    if (!ready || !incidentLoaded || !incident.id) return;
+    const unsubscribe = watchMaydayAlert(incident.id, (record) => {
+      setMaydayAlertActive(!!(record && record.active));
+    });
+    return () => unsubscribe();
+  }, [ready, incidentLoaded, incident.id]);
+
+  // While a Mayday is active, force the modal open (even if the user
+  // is on a different tab entirely) and play the alarm on a repeating
+  // interval until it's cleared.
+  useEffect(() => {
+    if (maydayAlertActive) {
+      setShowMaydayModal(true);
+      playMaydayTone();
+      const interval = setInterval(playMaydayTone, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [maydayAlertActive]);
+
+  // Periodic PAR reminder — counts from the last completed PAR
+  // (lastParAt), checked once a minute against the admin-configured
+  // interval. Resets automatically once a PAR is actually completed
+  // (see completeParSession).
+  useEffect(() => {
+    if (!ready || !incidentLoaded) return;
+    const checkDue = () => {
+      // Counts from the last completed PAR if one exists, otherwise
+      // from the incident's own operational start time — so a long
+      // incident where nobody has taken a first PAR yet still gets
+      // reminded, rather than the reminder never firing at all until
+      // someone happens to take one.
+      const baseline = incident.lastParAt || incident.opStart;
+      if (!baseline) return;
+      const minutesSince = (Date.now() - new Date(baseline).getTime()) / 60000;
+      if (minutesSince >= (presets.parIntervalMinutes || 15)) setParReminderDue(true);
+    };
+    checkDue();
+    const interval = setInterval(checkDue, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [ready, incidentLoaded, incident.lastParAt, incident.opStart, presets.parIntervalMinutes]);
+
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
     setAttachments([]);
@@ -6351,6 +6597,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 onOpenManageResources={() => setShowManageResourcesAuth(true)}
                 taskPresets={presets.tasks} onSaveTaskPreset={saveTaskPreset}
                 resourceColumnOrder={resourceColumnOrder} setResourceColumnOrder={setResourceColumnOrder}
+                onTriggerMayday={startMayday} onStartPar={startPar}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "weather" && <TabWeather />}
@@ -6399,6 +6646,40 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onCancel={() => setShowAdminAuth(false)}
         />
       )}
+      {showMaydayModal && (
+        <ParCheckModal
+          mode="mayday"
+          resources={resources}
+          parSession={incident.parSession}
+          onCheck={toggleParCheck}
+          onComplete={completeParSession}
+          onClose={closeParModal}
+        />
+      )}
+      {showParModal && (
+        <ParCheckModal
+          mode="par"
+          resources={resources}
+          parSession={incident.parSession}
+          onCheck={toggleParCheck}
+          onComplete={completeParSession}
+          onClose={closeParModal}
+        />
+      )}
+      {parReminderDue && !showMaydayModal && !showParModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 92, padding: 16 }}>
+          <div style={{ background: COLORS.panel, border: `2px solid ${COLORS.amber}`, borderRadius: 8, width: 360, maxWidth: "100%", padding: 20, textAlign: "center" }}>
+            <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 16, marginBottom: 8 }}>PAR Reminder</div>
+            <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 16, lineHeight: 1.5 }}>
+              It's been {presets.parIntervalMinutes || 15}+ minutes since the last accountability check. Take a PAR now?
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn kind="solid" onClick={() => { setParReminderDue(false); startPar(); }} style={{ flex: 1, justifyContent: "center" }}>Take PAR Now</Btn>
+              <Btn kind="ghost" onClick={() => setParReminderDue(false)}>Dismiss</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       {showAdminMenu && (
         <AdminModal
           onClose={() => setShowAdminMenu(false)}
@@ -6407,6 +6688,15 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
           onManageResources={() => { setShowAdminMenu(false); setManageResourcesFromAdmin(true); setShowManageResources(true); }}
           onManageObjectives={() => { setShowAdminMenu(false); setShowManageObjectives(true); }}
+          onManageParSettings={() => { setShowAdminMenu(false); setShowParSettings(true); }}
+        />
+      )}
+      {showParSettings && (
+        <ParSettingsModal
+          onClose={() => setShowParSettings(false)}
+          onBack={() => { setShowParSettings(false); setShowAdminMenu(true); }}
+          parIntervalMinutes={presets.parIntervalMinutes}
+          onSave={setParIntervalMinutes}
         />
       )}
       {showChangePin && <ChangePinModal onClose={() => setShowChangePin(false)} onBack={() => { setShowChangePin(false); setShowAdminMenu(true); }} />}
