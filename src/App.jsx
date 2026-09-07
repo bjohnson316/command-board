@@ -15,7 +15,7 @@ import {
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
 import PinGate, { refreshUnlockRecord } from "./PinGate.jsx";
-import { playMaydayTone, unlockAudioContext, setupAudioResumeListeners } from "./audio";
+import { playMaydayTone, stopMaydayTone, unlockAudioContext, setupAudioResumeListeners } from "./audio";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
@@ -6415,7 +6415,11 @@ function AppInner({ onLock, theme, toggleTheme }) {
     }
   }, [maydayAlertActive]);
 
-  // The alarm sound loop — separate from the modal-open effect above.
+  // The alarm sound — separate from the modal-open effect above.
+  // Now a looping <audio> element (see audio.js) rather than a
+  // repeating setInterval of one-shot Web Audio beeps, since Web
+  // Audio is what iOS silently mutes when the ringer switch is set to
+  // silent — an <audio> element is exempt from that restriction.
   // Stops (for everyone, since this reads the synced parSession) the
   // moment anyone starts actually taking PAR — checking off even one
   // unit is a strong enough signal that a response is underway that
@@ -6427,8 +6431,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   useEffect(() => {
     if (maydayAlertActive && !hasAnyParChecks && !alarmSilenced) {
       playMaydayTone();
-      const interval = setInterval(playMaydayTone, 3000);
-      return () => clearInterval(interval);
+      return () => stopMaydayTone();
     }
   }, [maydayAlertActive, hasAnyParChecks, alarmSilenced]);
 
