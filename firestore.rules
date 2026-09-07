@@ -17,5 +17,12 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
+    // Mayday alerts — a separate, minimal collection from the main
+    // incident documents above, specifically so a Mayday reaches
+    // every device instantly via its own listener rather than being
+    // subject to the main incident sync's local-edit-avoidance delay.
+    match /icMayday/{docId} {
+      allow read, write: if true;
+    }
   }
 }
