@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
 import { loadPinConfig, savePinConfig } from "./store";
 import { sha256 } from "./pin";
+import { unlockAudioContext } from "./audio";
 
 const UNLOCK_KEY = "cb_unlock_session";
 // Deliberately short — long enough to tolerate an incidental reload
@@ -98,6 +99,7 @@ export default function PinGate({ children }) {
   }, [phase, config]);
 
   const doSetup = async () => {
+    unlockAudioContext(); // must happen synchronously, before any await, to count as "within the gesture"
     setError("");
     if (pin.length < 4) return setError("PIN must be at least 4 digits.");
     if (pin !== pin2) return setError("PINs don't match.");
@@ -108,6 +110,7 @@ export default function PinGate({ children }) {
   };
 
   const doUnlock = async () => {
+    unlockAudioContext();
     setError("");
     const hash = await sha256(pin);
     if (hash === config.pinHash) {

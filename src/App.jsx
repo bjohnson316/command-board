@@ -15,6 +15,7 @@ import {
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
 import PinGate, { refreshUnlockRecord } from "./PinGate.jsx";
+import { playMaydayTone, unlockAudioContext } from "./audio";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
@@ -70,39 +71,6 @@ const ACTIVE_STATUS = "Active";
 function normalizeResourceStatus(status) {
   if (status === "Staging") return ACTIVE_STATUS;
   return STATUS_FLOW.includes(status) ? status : ACTIVE_STATUS;
-}
-// A generated two-tone siren, not an audio file — avoids needing any
-// external asset, and works the same everywhere. Browsers generally
-// block audio from starting without a preceding user interaction on
-// the page; since triggering a Mayday IS a click, the device that
-// triggers it always plays correctly, but a device merely receiving
-// the alert remotely may have this silently blocked if nobody has
-// interacted with that tab recently — a real, unavoidable browser
-// limitation this feature can't fully guarantee around. The popup
-// itself still always appears regardless.
-function playMaydayTone() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const beep = (freq, startTime, duration) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.001, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.3, startTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(startTime);
-      osc.stop(startTime + duration + 0.02);
-    };
-    const now = ctx.currentTime;
-    for (let i = 0; i < 4; i++) {
-      beep(880, now + i * 0.4, 0.18);
-      beep(660, now + i * 0.4 + 0.2, 0.18);
-    }
-    setTimeout(() => ctx.close(), 2000);
-  } catch { /* Web Audio unsupported or blocked — the popup still shows regardless */ }
 }
 const STATUS_COLOR = {
   [ACTIVE_STATUS]: COLORS.blue,
@@ -1043,14 +1011,19 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
 // directly — that's handled at the AppInner level, since a Mayday
 // needs to be visible regardless of which tab is currently open, not
 // just while the Resource Board happens to be showing.
-function ParCheckModal({ mode, resources, parSession, onCheck, onComplete, onClose }) {
+function ParCheckModal({ mode, resources, parSession, onCheck, onComplete, onClose, isAlarmPlaying, onSilenceAlarm }) {
   const isMayday = mode === "mayday";
   const accent = isMayday ? COLORS.red : COLORS.amber;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 95, padding: 16 }}>
       <div style={{ background: COLORS.panel, border: `2px solid ${accent}`, borderRadius: 8, width: 560, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", padding: 20 }}>
-        <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: isMayday ? 19 : 15, color: isMayday ? COLORS.red : COLORS.text, fontWeight: 700, marginBottom: 4 }}>
-          {isMayday ? "MAYDAY — Personnel Accountability Report" : "PAR Check"}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 4 }}>
+          <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: isMayday ? 19 : 15, color: isMayday ? COLORS.red : COLORS.text, fontWeight: 700 }}>
+            {isMayday ? "MAYDAY — Personnel Accountability Report" : "PAR Check"}
+          </div>
+          {isMayday && isAlarmPlaying && (
+            <Btn kind="ghost" onClick={onSilenceAlarm} style={{ padding: "6px 11px", fontSize: 12, flexShrink: 0 }}>Silence Alarm</Btn>
+          )}
         </div>
         <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
           Check off each unit as it reports in — the time is recorded automatically.
@@ -5927,14 +5900,32 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [resourceColumnOrder, setResourceColumnOrder] = useState([]);
   const [showMaydayModal, setShowMaydayModal] = useState(false);
   const [showParModal, setShowParModal] = useState(false);
+  const [showMaydayConfirm, setShowMaydayConfirm] = useState(false);
   // Tracks the separate, dedicated cross-device Mayday alert (see
   // triggerMaydayAlert/watchMaydayAlert in store.js) — distinct from
   // showMaydayModal, since a remote Mayday needs to force the modal
   // open (and the alarm playing) on this device even if this device
   // isn't the one that triggered it.
   const [maydayAlertActive, setMaydayAlertActive] = useState(false);
-  const maydayAudioCtxRef = useRef(null);
+  // Local to THIS device only — never synced. Pressing "Silence
+  // Alarm" only quiets it here; every other device keeps sounding
+  // until they silence it themselves, take PAR themselves, or the
+  // Mayday is cleared entirely. Resets to false the moment a fresh
+  // Mayday starts, so a silenced alarm from a past Mayday can't
+  // accidentally suppress a brand new one.
+  const [alarmSilenced, setAlarmSilenced] = useState(false);
   const [parReminderDue, setParReminderDue] = useState(false);
+  // Covers the case where this device skipped the PIN screen entirely
+  // (auto-unlocked via the grace period — see PinGate.jsx), meaning
+  // unlockAudioContext was never called from there. This unlocks it
+  // on the very first tap/click anywhere in the app instead, as a
+  // safety net, so a remotely-triggered Mayday still has a real
+  // chance of playing audibly on this device.
+  useEffect(() => {
+    const handler = () => unlockAudioContext();
+    window.addEventListener("pointerdown", handler, { once: true });
+    return () => window.removeEventListener("pointerdown", handler);
+  }, []);
   const [org, setOrg] = useState({ positions: {}, divisions: [] });
   const [comms, setComms] = useState(defaultComms());
   const [safety, setSafety] = useState({ opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] });
@@ -6221,6 +6212,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setShowMaydayModal(false);
     setShowParModal(false);
   };
+  const silenceAlarm = () => setAlarmSilenced(true);
   const addResourceKind = (name) => {
     const trimmed = name.trim();
     if (!trimmed || presets.resourceKinds.includes(trimmed)) return;
@@ -6400,16 +6392,34 @@ function AppInner({ onLock, theme, toggleTheme }) {
   }, [ready, incidentLoaded, incident.id]);
 
   // While a Mayday is active, force the modal open (even if the user
-  // is on a different tab entirely) and play the alarm on a repeating
-  // interval until it's cleared.
+  // is on a different tab entirely) — separate from the alarm sound
+  // itself below, since the modal should stay open even after the
+  // alarm has stopped playing. Resets alarmSilenced whenever a fresh
+  // Mayday starts, so a silence from a past one can't suppress a new
+  // one.
   useEffect(() => {
     if (maydayAlertActive) {
       setShowMaydayModal(true);
+      setAlarmSilenced(false);
+    }
+  }, [maydayAlertActive]);
+
+  // The alarm sound loop — separate from the modal-open effect above.
+  // Stops (for everyone, since this reads the synced parSession) the
+  // moment anyone starts actually taking PAR — checking off even one
+  // unit is a strong enough signal that a response is underway that
+  // continuing to blare the alarm everywhere no longer helps. Also
+  // stops locally-only via alarmSilenced, which the Silence Alarm
+  // button in the modal sets — that one is deliberately NOT synced,
+  // so silencing it on one device never silences it anywhere else.
+  const hasAnyParChecks = !!(incident.parSession && incident.parSession.type === "mayday" && Object.keys(incident.parSession.checks || {}).length > 0);
+  useEffect(() => {
+    if (maydayAlertActive && !hasAnyParChecks && !alarmSilenced) {
       playMaydayTone();
       const interval = setInterval(playMaydayTone, 3000);
       return () => clearInterval(interval);
     }
-  }, [maydayAlertActive]);
+  }, [maydayAlertActive, hasAnyParChecks, alarmSilenced]);
 
   // Periodic PAR reminder — counts from the last completed PAR
   // (lastParAt), checked once a minute against the admin-configured
@@ -6597,7 +6607,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 onOpenManageResources={() => setShowManageResourcesAuth(true)}
                 taskPresets={presets.tasks} onSaveTaskPreset={saveTaskPreset}
                 resourceColumnOrder={resourceColumnOrder} setResourceColumnOrder={setResourceColumnOrder}
-                onTriggerMayday={startMayday} onStartPar={startPar}
+                onTriggerMayday={() => setShowMaydayConfirm(true)} onStartPar={startPar}
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
               {tab === "weather" && <TabWeather />}
@@ -6646,6 +6656,22 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onCancel={() => setShowAdminAuth(false)}
         />
       )}
+      {showMaydayConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 96, padding: 16 }}>
+          <div style={{ background: COLORS.panel, border: `2px solid ${COLORS.red}`, borderRadius: 8, width: 380, maxWidth: "100%", padding: 22, textAlign: "center" }}>
+            <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 17, color: COLORS.red, fontWeight: 700, marginBottom: 10 }}>
+              Declare a MAYDAY?
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 18, lineHeight: 1.5 }}>
+              This will sound an alarm and open a PAR check on every device currently viewing this incident. Only confirm if this is real.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn kind="danger" onClick={() => { setShowMaydayConfirm(false); startMayday(); }} style={{ flex: 1, justifyContent: "center" }}>Confirm Mayday</Btn>
+              <Btn kind="ghost" onClick={() => setShowMaydayConfirm(false)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       {showMaydayModal && (
         <ParCheckModal
           mode="mayday"
@@ -6654,6 +6680,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onCheck={toggleParCheck}
           onComplete={completeParSession}
           onClose={closeParModal}
+          isAlarmPlaying={maydayAlertActive && !hasAnyParChecks && !alarmSilenced}
+          onSilenceAlarm={silenceAlarm}
         />
       )}
       {showParModal && (
