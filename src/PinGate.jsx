@@ -4,6 +4,33 @@ import { COLORS, KFD_PATCH_DATA_URI } from "./theme";
 import { loadPinConfig, savePinConfig } from "./store";
 import { sha256 } from "./pin";
 
+const UNLOCK_KEY = "cb_unlock_session";
+// Deliberately short — long enough to tolerate an incidental reload
+// (an accidental refresh, or iPad Safari discarding this tab under
+// memory pressure and reloading it when switched back to) without
+// forcing a re-entry, but short enough that leaving the board
+// actually closed or unattended for a while still re-locks it.
+const GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+
+function readUnlockRecord() {
+  try {
+    const raw = localStorage.getItem(UNLOCK_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+// Exported so ChangePinModal (in App.jsx) can refresh the record with
+// the new hash immediately after a PIN change — otherwise the old
+// hash would no longer match on the very next reload, breaking the
+// grace period right after a legitimate change.
+export function refreshUnlockRecord(hash) {
+  try { localStorage.setItem(UNLOCK_KEY, JSON.stringify({ hash, at: Date.now() })); } catch { /* private browsing, etc. */ }
+}
+function clearUnlockRecord() {
+  try { localStorage.removeItem(UNLOCK_KEY); } catch { /* ignore */ }
+}
+
 const wrap = {
   minHeight: "100vh", background: COLORS.bg, color: COLORS.text,
   display: "flex", alignItems: "center", justifyContent: "center",
@@ -26,13 +53,12 @@ const btn = {
 };
 
 // Renders children once unlocked. Handles first-run PIN setup and
-// later PIN entry. The unlock is intentionally NOT persisted anywhere
-// (no localStorage/sessionStorage) — it lives purely in React state,
-// which is why it resets to locked on every full page load, whether
-// from an explicit refresh or the browser/tab being closed and
-// reopened. The trade-off: on iPad Safari specifically, backgrounding
-// this tab to use another app can cause Safari to reload it under
-// memory pressure, which will also re-lock it.
+// later PIN entry. The unlock persists across a reload only within a
+// short grace period (see GRACE_PERIOD_MS) — an incidental reload
+// (accidental refresh, or iPad Safari discarding a backgrounded tab
+// under memory pressure) won't force re-entry, but the board still
+// locks itself out after being closed or left alone for a while, or
+// immediately on an explicit Lock.
 export default function PinGate({ children }) {
   const [phase, setPhase] = useState("loading"); // loading | setup | locked | unlocked
   const [config, setConfig] = useState(null);
@@ -48,9 +74,28 @@ export default function PinGate({ children }) {
         setPhase("setup");
         return;
       }
-      setPhase("locked");
+      const record = readUnlockRecord();
+      const withinGrace = record && record.hash === cfg.pinHash && (Date.now() - record.at) < GRACE_PERIOD_MS;
+      if (withinGrace) {
+        refreshUnlockRecord(cfg.pinHash); // sliding window — still-active use keeps extending it
+        setPhase("unlocked");
+      } else {
+        clearUnlockRecord();
+        setPhase("locked");
+      }
     })();
   }, []);
+
+  // Keeps the grace-period timestamp fresh while the board stays open
+  // and unlocked, not just at the moment of reload — without this, a
+  // session active for longer than GRACE_PERIOD_MS with no reload in
+  // between would have a stale timestamp, and an incidental reload
+  // right then would wrongly lock someone out despite continuous use.
+  useEffect(() => {
+    if (phase !== "unlocked" || !config) return;
+    const interval = setInterval(() => refreshUnlockRecord(config.pinHash), 60 * 1000);
+    return () => clearInterval(interval);
+  }, [phase, config]);
 
   const doSetup = async () => {
     setError("");
@@ -58,6 +103,7 @@ export default function PinGate({ children }) {
     if (pin !== pin2) return setError("PINs don't match.");
     const pinHash = await sha256(pin);
     await savePinConfig({ pinHash });
+    refreshUnlockRecord(pinHash);
     setPhase("unlocked");
   };
 
@@ -65,6 +111,7 @@ export default function PinGate({ children }) {
     setError("");
     const hash = await sha256(pin);
     if (hash === config.pinHash) {
+      refreshUnlockRecord(hash);
       setPhase("unlocked");
     } else {
       setError("Incorrect PIN.");
@@ -77,6 +124,7 @@ export default function PinGate({ children }) {
   }
 
   const lock = () => {
+    clearUnlockRecord();
     setPin("");
     setError("");
     setPhase("locked");

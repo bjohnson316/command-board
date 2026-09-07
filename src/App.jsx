@@ -13,7 +13,7 @@ import {
   loadAttachments, saveAttachment, deleteAttachment, deleteAllAttachments,
 } from "./store";
 import { COLORS, KFD_PATCH_DATA_URI, THEME_CSS } from "./theme";
-import PinGate from "./PinGate.jsx";
+import PinGate, { refreshUnlockRecord } from "./PinGate.jsx";
 import { sha256 } from "./pin";
 import L from "leaflet";
 import "leaflet-draw";
@@ -5286,6 +5286,7 @@ function ChangePinModal({ onClose, onBack }) {
     setStatus("saving");
     const nextHash = await sha256(next);
     await savePinConfig({ ...cfg, pinHash: nextHash });
+    refreshUnlockRecord(nextHash);
     setStatus("done");
     setTimeout(onClose, 900);
   };
