@@ -6207,24 +6207,42 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setIncident(prev => ({ ...prev, parSession: { type: "par", startedAt: nowISO(), checks: {} } }));
     setShowParModal(true);
   };
-  const toggleParCheck = (resourceId) => {
+  // Same reasoning as completeParSession below — parSession might
+  // genuinely not have synced to this device yet, especially right
+  // after the modal force-opens via the fast, separate Mayday
+  // channel. Rather than silently doing nothing (a checkbox click
+  // that appears to not register at all), this initializes a fresh
+  // session using the mode the modal itself already knows, rather
+  // than requiring parSession to already exist first.
+  const toggleParCheck = (resourceId, mode) => {
     setIncident(prev => {
-      if (!prev.parSession) return prev;
-      const nextChecks = { ...prev.parSession.checks };
+      const session = prev.parSession || { type: mode, startedAt: nowISO(), checks: {} };
+      const nextChecks = { ...session.checks };
       if (nextChecks[resourceId]) delete nextChecks[resourceId];
       else nextChecks[resourceId] = nowISO();
-      return { ...prev, parSession: { ...prev.parSession, checks: nextChecks } };
+      return { ...prev, parSession: { ...session, checks: nextChecks } };
     });
   };
-  const completeParSession = () => {
+  // Takes mode explicitly rather than inferring it from
+  // incident.parSession.type — that field syncs through the normal
+  // incident-blob channel, which can genuinely still be in flight on
+  // a device other than the one that triggered the Mayday (the modal
+  // itself force-opens instantly via the separate, dedicated Mayday
+  // channel, well before the slower incident sync is guaranteed to
+  // have delivered parSession yet). Inferring from a field that might
+  // not have arrived meant clearMaydayAlert could silently never get
+  // called at all — the modal would still close locally, but the
+  // underlying alert record never actually changed, so the Mayday
+  // would reappear the moment the incident was reloaded.
+  const completeParSession = (mode) => {
     const session = incident.parSession;
-    const checkedCount = session ? Object.keys(session.checks).length : 0;
-    const entry = { id: uid(), type: session?.type || "par", startedAt: session?.startedAt || nowISO(), completedAt: nowISO(), totalUnits: resources.length, checkedUnits: checkedCount };
+    const checkedCount = session ? Object.keys(session.checks || {}).length : 0;
+    const entry = { id: uid(), type: mode, startedAt: session?.startedAt || nowISO(), completedAt: nowISO(), totalUnits: resources.length, checkedUnits: checkedCount };
     setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory] }));
     setShowMaydayModal(false);
     setShowParModal(false);
     setParReminderDue(false);
-    if (session?.type === "mayday" && incident.id) clearMaydayAlert(incident.id).catch(() => console.error("Failed to clear the Mayday alert on other devices."));
+    if (mode === "mayday" && incident.id) clearMaydayAlert(incident.id).catch(() => console.error("Failed to clear the Mayday alert on other devices."));
   };
   const closeParModal = () => {
     setShowMaydayModal(false);
@@ -6704,8 +6722,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
           mode="mayday"
           resources={resources}
           parSession={incident.parSession}
-          onCheck={toggleParCheck}
-          onComplete={completeParSession}
+          onCheck={(id) => toggleParCheck(id, "mayday")}
+          onComplete={() => completeParSession("mayday")}
           onClose={closeParModal}
           isAlarmPlaying={maydayAlertActive && !hasAnyParChecks && !alarmSilenced}
           onSilenceAlarm={silenceAlarm}
@@ -6716,8 +6734,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
           mode="par"
           resources={resources}
           parSession={incident.parSession}
-          onCheck={toggleParCheck}
-          onComplete={completeParSession}
+          onCheck={(id) => toggleParCheck(id, "par")}
+          onComplete={() => completeParSession("par")}
           onClose={closeParModal}
         />
       )}
