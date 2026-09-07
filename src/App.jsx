@@ -1011,6 +1011,54 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
 // directly — that's handled at the AppInner level, since a Mayday
 // needs to be visible regardless of which tab is currently open, not
 // just while the Resource Board happens to be showing.
+// Read-only view of past PAR/Mayday events (see completeParSession in
+// AppInner, which is what populates incident.parHistory) — same
+// underlying information as the PDF export's "PAR / Mayday History"
+// section, just viewable in-app without needing to export anything.
+function ParHistoryModal({ history, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 90, padding: 16 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 520, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 15 }}>PAR / Mayday History</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        {(!history || history.length === 0) ? (
+          <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>No PAR or Mayday checks recorded yet on this incident.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {history.map(p => {
+              const isMayday = p.type === "mayday";
+              return (
+                <div key={p.id} style={{ border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${isMayday ? COLORS.red : COLORS.amber}`, borderRadius: 6, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13, fontWeight: 700, color: isMayday ? COLORS.red : COLORS.text }}>
+                      {isMayday ? "MAYDAY" : "PAR"}
+                    </span>
+                    <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      {fmtDateTimeShort(p.startedAt)} → {fmtDateTimeShort(p.completedAt)} · {p.checkedUnits} of {p.totalUnits} units
+                    </span>
+                  </div>
+                  {p.checkedUnitNames && p.checkedUnitNames.length > 0 && (
+                    <div style={{ fontSize: 12.5, color: COLORS.text, marginBottom: p.uncheckedUnitNames?.length ? 4 : 0 }}>
+                      <span style={{ color: COLORS.muted }}>Accounted for: </span>{p.checkedUnitNames.join(", ")}
+                    </div>
+                  )}
+                  {p.uncheckedUnitNames && p.uncheckedUnitNames.length > 0 && (
+                    <div style={{ fontSize: 12.5, color: COLORS.red }}>
+                      <span style={{ color: COLORS.red, opacity: 0.8 }}>NOT accounted for: </span>{p.uncheckedUnitNames.join(", ")}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ParCheckModal({ mode, resources, parSession, onCheck, onComplete, onClose, isAlarmPlaying, onSilenceAlarm }) {
   const isMayday = mode === "mayday";
   const accent = isMayday ? COLORS.red : COLORS.amber;
@@ -1434,6 +1482,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, dep
   // drag-and-drop, because HTML5 DnD is unreliable on touch devices —
   // this app needs to work on iPads and phones, not just desktop mice.
   const [drag, setDrag] = useState(null); // { id, x, y, overColumn }
+  const [showParHistory, setShowParHistory] = useState(false);
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
@@ -1542,9 +1591,11 @@ function TabResources({ resources, setResources, now, incident, setIncident, dep
               style={{ background: COLORS.amber, color: "#191C1F", border: "none", borderRadius: 6, padding: "13px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 15, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
               PAR
             </button>
+            <Btn kind="ghost" onClick={() => setShowParHistory(true)} style={{ width: "100%", justifyContent: "center", fontSize: 12.5 }}>View History</Btn>
           </div>
         </Panel>
       </div>
+      {showParHistory && <ParHistoryModal history={incident.parHistory} onClose={() => setShowParHistory(false)} />}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         <DragReorderList items={columns} keyFn={col => col} onReorderFull={setResourceColumnOrder} axis="horizontal" renderItem={(col, i, colDragHandleProps) => {
           const items = resources.filter(r => columnFor(r) === col);
@@ -4205,14 +4256,28 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   // parHistory is stored as part of the incident's own saved data
   // (same place as resources, logs, etc.) — one entry per completed
   // PAR or Mayday check, recorded when that session is closed out via
-  // "Complete PAR" / "All Clear — End Mayday".
-  L.push(...tableLines(["TYPE", "STARTED", "COMPLETED", "UNITS ACCOUNTED FOR"], [90, 130, 130, 200],
-    (incident.parHistory || []).map(p => [
-      p.type === "mayday" ? "MAYDAY" : "PAR",
-      fmtDateTimeShort(p.startedAt),
-      fmtDateTimeShort(p.completedAt),
-      `${p.checkedUnits} of ${p.totalUnits}`,
-    ]), "PAR / Mayday History"));
+  // "Complete PAR" / "All Clear — End Mayday". Shown as wrapped text
+  // rather than a rigid table specifically so the actual unit names
+  // can be listed in full rather than truncated to fit a column —
+  // and critically, which units were NOT accounted for is called out
+  // just as clearly as which ones were, since for a Mayday record
+  // specifically that's the more safety-relevant half of the record.
+  L.push({ kind: "heading", text: "PAR / Mayday History" });
+  if ((incident.parHistory || []).length === 0) {
+    push("(none recorded)");
+  } else {
+    incident.parHistory.forEach(p => {
+      const label = p.type === "mayday" ? "MAYDAY" : "PAR";
+      push(`${label} — Started ${fmtDateTimeShort(p.startedAt)}, Completed ${fmtDateTimeShort(p.completedAt)} (${p.checkedUnits} of ${p.totalUnits} units)`, "HB", 9);
+      if (p.checkedUnitNames && p.checkedUnitNames.length > 0) {
+        wrapPush(L, `Accounted for: ${p.checkedUnitNames.join(", ")}`);
+      }
+      if (p.uncheckedUnitNames && p.uncheckedUnitNames.length > 0) {
+        wrapPush(L, `NOT accounted for: ${p.uncheckedUnitNames.join(", ")}`);
+      }
+      blank();
+    });
+  }
 
   const vitalsSegments = (r) => {
     const segs = [];
@@ -6236,8 +6301,18 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // would reappear the moment the incident was reloaded.
   const completeParSession = (mode) => {
     const session = incident.parSession;
-    const checkedCount = session ? Object.keys(session.checks || {}).length : 0;
-    const entry = { id: uid(), type: mode, startedAt: session?.startedAt || nowISO(), completedAt: nowISO(), totalUnits: resources.length, checkedUnits: checkedCount };
+    const checks = session?.checks || {};
+    // Captures the actual unit names on both sides, not just a count
+    // — which units reported in, and just as importantly for a
+    // Mayday specifically, which ones did NOT, so that's preserved in
+    // the record rather than only a "6 of 7" tally.
+    const checkedUnitNames = resources.filter(r => checks[r.id]).map(r => r.label);
+    const uncheckedUnitNames = resources.filter(r => !checks[r.id]).map(r => r.label);
+    const entry = {
+      id: uid(), type: mode, startedAt: session?.startedAt || nowISO(), completedAt: nowISO(),
+      totalUnits: resources.length, checkedUnits: checkedUnitNames.length,
+      checkedUnitNames, uncheckedUnitNames,
+    };
     setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory] }));
     setShowMaydayModal(false);
     setShowParModal(false);
