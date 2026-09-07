@@ -370,6 +370,11 @@ function blankIncident() {
     parSession: null,
     lastParAt: "",
     parHistory: [],
+    // Each entry records a moment the periodic PAR reminder was
+    // dismissed rather than acted on — shown alongside parHistory so
+    // an ignored reminder is just as visible a record as a completed
+    // check, not silently invisible.
+    ignoredParReminders: [],
     actionsLog: [],
     resourceOrders: [],
     mapSketch: "",
@@ -402,6 +407,7 @@ function normalizeIncident(inc) {
     parSession: null,
     lastParAt: "",
     parHistory: [],
+    ignoredParReminders: [],
     ...migrated,
   };
 }
@@ -1015,7 +1021,16 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
 // AppInner, which is what populates incident.parHistory) — same
 // underlying information as the PDF export's "PAR / Mayday History"
 // section, just viewable in-app without needing to export anything.
-function ParHistoryModal({ history, onClose }) {
+function ParHistoryModal({ history, ignoredReminders, onClose }) {
+  // Merged and sorted by time so ignored reminders show up in their
+  // actual chronological place alongside completed checks, rather
+  // than as a disconnected second list the reader has to
+  // cross-reference themselves.
+  const merged = [
+    ...(history || []).map(p => ({ ...p, kind: p.type, sortAt: p.completedAt })),
+    ...(ignoredReminders || []).map(r => ({ ...r, kind: "ignored", sortAt: r.at })),
+  ].sort((a, b) => new Date(b.sortAt) - new Date(a.sortAt));
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 90, padding: 16 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 520, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
@@ -1023,12 +1038,24 @@ function ParHistoryModal({ history, onClose }) {
           <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 15 }}>PAR / Mayday History</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
         </div>
-        {(!history || history.length === 0) ? (
-          <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>No PAR or Mayday checks recorded yet on this incident.</div>
+        {merged.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint, padding: "10px 2px" }}>No PAR or Mayday activity recorded yet on this incident.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {history.map(p => {
-              const isMayday = p.type === "mayday";
+            {merged.map(p => {
+              if (p.kind === "ignored") {
+                return (
+                  <div key={p.id} style={{ border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${COLORS.faint}`, borderRadius: 6, padding: "10px 12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                      <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13, fontWeight: 700, color: COLORS.muted }}>
+                        PAR REMINDER IGNORED
+                      </span>
+                      <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'IBM Plex Mono', monospace" }}>{fmtDateTimeShort(p.at)}</span>
+                    </div>
+                  </div>
+                );
+              }
+              const isMayday = p.kind === "mayday";
               return (
                 <div key={p.id} style={{ border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${isMayday ? COLORS.red : COLORS.amber}`, borderRadius: 6, padding: "10px 12px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
@@ -1475,7 +1502,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, incident, setIncident, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
+function TabResources({ resources, setResources, now, incident, setIncident, parIntervalMinutes, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1583,6 +1610,24 @@ function TabResources({ resources, setResources, now, incident, setIncident, dep
         </Panel>
         <Panel title="Accountability" icon={AlertTriangle} style={{ flex: "0 0 180px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {(() => {
+              // Counts from the last completed PAR if one exists,
+              // otherwise from the incident's own operational start —
+              // the same baseline the 15-minute reminder itself uses
+              // (see the reminder effect in AppInner), so this clock
+              // and when the reminder actually fires always agree.
+              const parBaseline = incident.lastParAt || incident.opStart;
+              const minutesSince = parBaseline ? (now - new Date(parBaseline).getTime()) / 60000 : 0;
+              const isOverdue = minutesSince >= (parIntervalMinutes || 15);
+              return (
+                <div style={{ textAlign: "center", padding: "6px 4px 2px" }}>
+                  <div style={{ fontSize: 10.5, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Time Since Last PAR</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: isOverdue ? COLORS.red : COLORS.text }}>
+                    {parBaseline ? elapsed(parBaseline, now) : "—"}
+                  </div>
+                </div>
+              );
+            })()}
             <button onClick={onTriggerMayday}
               style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 6, padding: "16px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 17, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
               Mayday
@@ -1595,7 +1640,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, dep
           </div>
         </Panel>
       </div>
-      {showParHistory && <ParHistoryModal history={incident.parHistory} onClose={() => setShowParHistory(false)} />}
+      {showParHistory && <ParHistoryModal history={incident.parHistory} ignoredReminders={incident.ignoredParReminders} onClose={() => setShowParHistory(false)} />}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         <DragReorderList items={columns} keyFn={col => col} onReorderFull={setResourceColumnOrder} axis="horizontal" renderItem={(col, i, colDragHandleProps) => {
           const items = resources.filter(r => columnFor(r) === col);
@@ -4262,12 +4307,26 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   // and critically, which units were NOT accounted for is called out
   // just as clearly as which ones were, since for a Mayday record
   // specifically that's the more safety-relevant half of the record.
+  // Ignored PAR reminders are merged in by actual time rather than
+  // listed separately, so a dismissed notification shows up exactly
+  // where it happened relative to the checks that were (or weren't)
+  // actually taken — matching the same merge the in-app history view
+  // uses, so the two never tell a different story.
   L.push({ kind: "heading", text: "PAR / Mayday History" });
-  if ((incident.parHistory || []).length === 0) {
+  const mergedParHistory = [
+    ...(incident.parHistory || []).map(p => ({ ...p, kind: p.type, sortAt: p.completedAt })),
+    ...(incident.ignoredParReminders || []).map(r => ({ ...r, kind: "ignored", sortAt: r.at })),
+  ].sort((a, b) => new Date(b.sortAt) - new Date(a.sortAt));
+  if (mergedParHistory.length === 0) {
     push("(none recorded)");
   } else {
-    incident.parHistory.forEach(p => {
-      const label = p.type === "mayday" ? "MAYDAY" : "PAR";
+    mergedParHistory.forEach(p => {
+      if (p.kind === "ignored") {
+        push(`PAR REMINDER IGNORED — ${fmtDateTimeShort(p.at)}`, "HB", 9);
+        blank();
+        return;
+      }
+      const label = p.kind === "mayday" ? "MAYDAY" : "PAR";
       push(`${label} — Started ${fmtDateTimeShort(p.startedAt)}, Completed ${fmtDateTimeShort(p.completedAt)} (${p.checkedUnits} of ${p.totalUnits} units)`, "HB", 9);
       if (p.checkedUnitNames && p.checkedUnitNames.length > 0) {
         wrapPush(L, `Accounted for: ${p.checkedUnitNames.join(", ")}`);
@@ -6324,6 +6383,15 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setShowParModal(false);
   };
   const silenceAlarm = () => setAlarmSilenced(true);
+  // Recorded each time "Dismiss" is explicitly clicked on the PAR
+  // reminder — an intentional, visible signal that the notification
+  // was seen and not acted on, shown alongside completed checks in
+  // both the history view and the PDF export rather than leaving an
+  // ignored reminder invisible.
+  const dismissParReminder = () => {
+    setIncident(prev => ({ ...prev, ignoredParReminders: [{ id: uid(), at: nowISO() }, ...prev.ignoredParReminders] }));
+    setParReminderDue(false);
+  };
   const addResourceKind = (name) => {
     const trimmed = name.trim();
     if (!trimmed || presets.resourceKinds.includes(trimmed)) return;
@@ -6716,7 +6784,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             <>
               {tab === "201" && <Tab201 incident={incident} setIncident={setIncident} resources={resources} incidentTypePresets={presets.incidentTypes} objectivesByType={presets.objectivesByType} onAddObjective={addObjectiveForType} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "resources" && <TabResources resources={resources} setResources={setResources} now={effectiveNow}
-                incident={incident} setIncident={setIncident}
+                incident={incident} setIncident={setIncident} parIntervalMinutes={presets.parIntervalMinutes}
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
                 onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnits}
@@ -6823,7 +6891,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn kind="solid" onClick={() => { setParReminderDue(false); startPar(); }} style={{ flex: 1, justifyContent: "center" }}>Take PAR Now</Btn>
-              <Btn kind="ghost" onClick={() => setParReminderDue(false)}>Dismiss</Btn>
+              <Btn kind="ghost" onClick={dismissParReminder}>Dismiss</Btn>
             </div>
           </div>
         </div>
