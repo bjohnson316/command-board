@@ -2086,6 +2086,8 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
   const perimeterMarkerRef = useRef(null); // live position dot while tracing
   const perimeterWatchIdRef = useRef(null);
   const [tracking, setTracking] = useState(false);
+  const [gpsCoords, setGpsCoords] = useState(null); // { lat, lng, accuracy } while tracking, null otherwise
+  const [gpsCoordsCopied, setGpsCoordsCopied] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [activeTool, setActiveTool] = useState(null); // null | "text" | "freehand"
   const [textPrompt, setTextPrompt] = useState(null); // { latlng, value } while the text-label dialog is open
@@ -2603,6 +2605,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       if (gpsMarkerRef.current) { mapRef.current.removeLayer(gpsMarkerRef.current); gpsMarkerRef.current = null; }
       if (gpsAccuracyRef.current) { mapRef.current.removeLayer(gpsAccuracyRef.current); gpsAccuracyRef.current = null; }
       setTracking(false);
+      setGpsCoords(null);
       return;
     }
     if (!navigator.geolocation) { setGpsError("This device/browser doesn't support GPS location."); return; }
@@ -2612,6 +2615,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         const latlng = [latitude, longitude];
+        setGpsCoords({ lat: latitude, lng: longitude, accuracy });
         if (!gpsMarkerRef.current) {
           gpsMarkerRef.current = L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: "#3B6FA6", fillOpacity: 1 }).addTo(mapRef.current);
           gpsAccuracyRef.current = L.circle(latlng, { radius: accuracy, color: "#3B6FA6", weight: 1, fillOpacity: 0.1 }).addTo(mapRef.current);
@@ -2681,6 +2685,28 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
         })()}
         <div style={{ position: "relative" }}>
           <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
+          {tracking && gpsCoords && (
+            <div
+              onClick={async () => {
+                const text = `${gpsCoords.lat.toFixed(5)}, ${gpsCoords.lng.toFixed(5)}`;
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setGpsCoordsCopied(true);
+                  setTimeout(() => setGpsCoordsCopied(false), 1500);
+                } catch { /* clipboard unavailable — the coordinates are still visible to read/copy manually */ }
+              }}
+              title="Tap to copy"
+              style={{
+                position: "absolute", left: 10, bottom: 10, zIndex: 900,
+                background: "rgba(20,23,26,0.9)", color: "#EDEFF1", border: `1px solid ${COLORS.line}`,
+                borderRadius: 6, padding: "6px 10px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
+                cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 8,
+              }}
+            >
+              {gpsCoordsCopied ? "Copied!" : `${gpsCoords.lat.toFixed(5)}, ${gpsCoords.lng.toFixed(5)}`}
+              {!gpsCoordsCopied && <span style={{ color: COLORS.muted, fontSize: 10.5 }}>±{Math.round(gpsCoords.accuracy)}m</span>}
+            </div>
+          )}
           {(activeTool === "text" || activeTool === "freehand" || isMovingShape) && (
             <div
               onClick={handleOverlayClick}
