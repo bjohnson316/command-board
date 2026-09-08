@@ -1021,7 +1021,7 @@ function FlatListManager({ items, onRename, onDelete, onReorder, onAdd, addLabel
 // AppInner, which is what populates incident.parHistory) — same
 // underlying information as the PDF export's "PAR / Mayday History"
 // section, just viewable in-app without needing to export anything.
-function ParHistoryModal({ history, ignoredReminders, onClose }) {
+function ParHistoryModal({ history, ignoredReminders, onClose, onSelectEvent }) {
   // Merged and sorted by time so ignored reminders show up in their
   // actual chronological place alongside completed checks, rather
   // than as a disconnected second list the reader has to
@@ -1057,7 +1057,8 @@ function ParHistoryModal({ history, ignoredReminders, onClose }) {
               }
               const isMayday = p.kind === "mayday";
               return (
-                <div key={p.id} style={{ border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${isMayday ? COLORS.red : COLORS.amber}`, borderRadius: 6, padding: "10px 12px" }}>
+                <div key={p.id} onClick={() => onSelectEvent(p)}
+                  style={{ border: `1px solid ${COLORS.line}`, borderLeft: `3px solid ${isMayday ? COLORS.red : COLORS.amber}`, borderRadius: 6, padding: "10px 12px", cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
                     <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13, fontWeight: 700, color: isMayday ? COLORS.red : COLORS.text }}>
                       {isMayday ? "MAYDAY" : "PAR"}
@@ -1076,11 +1077,94 @@ function ParHistoryModal({ history, ignoredReminders, onClose }) {
                       <span style={{ color: COLORS.red, opacity: 0.8 }}>NOT accounted for: </span>{p.uncheckedUnitNames.join(", ")}
                     </div>
                   )}
+                  <div style={{ fontSize: 11, color: COLORS.faint, marginTop: 6 }}>View full detail & export →</div>
                 </div>
               );
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Full per-unit detail for a single PAR/Mayday event, opened by
+// clicking an entry in ParHistoryModal — shows each unit's
+// assignment/task exactly as they stood at the time of the event
+// (see completeParSession, which snapshots this rather than looking
+// it up live), plus the exact moment each one was checked, with its
+// own standalone PDF export for just this one event.
+function ParEventDetailModal({ event, incidentName, onClose }) {
+  const isMayday = event.kind === "mayday";
+  const hasDetail = event.checkedUnitDetails && event.checkedUnitDetails.length > 0;
+  const [exporting, setExporting] = useState(false);
+  const doExport = async () => {
+    setExporting(true);
+    try { await downloadParEventPdf(event, incidentName); }
+    finally { setExporting(false); }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 96, padding: 16 }}>
+      <div style={{ background: COLORS.panel, border: `2px solid ${isMayday ? COLORS.red : COLORS.amber}`, borderRadius: 8, width: 580, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 17, color: isMayday ? COLORS.red : COLORS.text, fontWeight: 700 }}>
+            {isMayday ? "MAYDAY" : "PAR"} Detail
+          </span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
+          Started {fmtDateTimeShort(event.startedAt)} · Completed {fmtDateTimeShort(event.completedAt)} · {event.checkedUnits} of {event.totalUnits} units
+        </div>
+        {!hasDetail && (
+          <div style={{ fontSize: 12, color: COLORS.faint, fontStyle: "italic", marginBottom: 12 }}>
+            This is an older entry recorded before per-unit assignment/task/timestamp detail was captured — showing names only.
+          </div>
+        )}
+        {hasDetail ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ borderBottom: `1px solid ${COLORS.line}`, color: COLORS.muted, textTransform: "uppercase", fontSize: 10.5 }}>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>Unit</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>Assignment</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>Task</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>Time Checked</th>
+              </tr></thead>
+              <tbody>
+                {event.checkedUnitDetails.map(u => (
+                  <tr key={u.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 600 }}>{u.label}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{u.assignment || "—"}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{u.task || "—"}</td>
+                    <td style={{ padding: "6px 8px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.teal }}>{fmtDateTimeShort(u.checkedAt)}</td>
+                  </tr>
+                ))}
+                {(event.uncheckedUnitDetails || []).map(u => (
+                  <tr key={u.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 600, color: COLORS.red }}>{u.label}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{u.assignment || "—"}</td>
+                    <td style={{ padding: "6px 8px", color: COLORS.muted }}>{u.task || "—"}</td>
+                    <td style={{ padding: "6px 8px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.red }}>NOT accounted for</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {event.checkedUnitNames && event.checkedUnitNames.length > 0 && (
+              <div style={{ fontSize: 12.5 }}><span style={{ color: COLORS.muted }}>Accounted for: </span>{event.checkedUnitNames.join(", ")}</div>
+            )}
+            {event.uncheckedUnitNames && event.uncheckedUnitNames.length > 0 && (
+              <div style={{ fontSize: 12.5, color: COLORS.red }}><span style={{ opacity: 0.8 }}>NOT accounted for: </span>{event.uncheckedUnitNames.join(", ")}</div>
+            )}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Btn kind="solid" icon={Download} onClick={doExport} disabled={exporting} style={{ flex: 1, justifyContent: "center" }}>
+            {exporting ? "Exporting…" : "Export PDF"}
+          </Btn>
+          <Btn kind="ghost" onClick={onClose}>Close</Btn>
+        </div>
       </div>
     </div>
   );
@@ -1510,6 +1594,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
   // this app needs to work on iPads and phones, not just desktop mice.
   const [drag, setDrag] = useState(null); // { id, x, y, overColumn }
   const [showParHistory, setShowParHistory] = useState(false);
+  const [selectedParEvent, setSelectedParEvent] = useState(null);
 
   const addResource = (r) => setResources([r, ...resources]);
   const removeResource = (id) => setResources(resources.filter(r => r.id !== id));
@@ -1640,7 +1725,21 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
           </div>
         </Panel>
       </div>
-      {showParHistory && <ParHistoryModal history={incident.parHistory} ignoredReminders={incident.ignoredParReminders} onClose={() => setShowParHistory(false)} />}
+      {showParHistory && (
+        <ParHistoryModal
+          history={incident.parHistory}
+          ignoredReminders={incident.ignoredParReminders}
+          onClose={() => setShowParHistory(false)}
+          onSelectEvent={(event) => setSelectedParEvent(event)}
+        />
+      )}
+      {selectedParEvent && (
+        <ParEventDetailModal
+          event={selectedParEvent}
+          incidentName={incident.name}
+          onClose={() => setSelectedParEvent(null)}
+        />
+      )}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, minmax(160px, 1fr))`, gap: 10, overflowX: "auto" }}>
         <DragReorderList items={columns} keyFn={col => col} onReorderFull={setResourceColumnOrder} axis="horizontal" renderItem={(col, i, colDragHandleProps) => {
           const items = resources.filter(r => columnFor(r) === col);
@@ -5246,6 +5345,57 @@ function loadLogoRGB(dataUri, maxDim = 130) {
   });
 }
 
+// A separate, standalone PDF for just one PAR/Mayday event, rather
+// than the full incident packet — reuses buildSimplePdf directly with
+// its own small "lines" array instead of going through
+// buildPacketLines, since this only ever needs a few lines and one or
+// two small tables, not the entire report structure.
+async function downloadParEventPdf(event, incidentName) {
+  const logo = await loadLogoRGB(KFD_PATCH_DATA_URI);
+  const isMayday = event.kind === "mayday";
+  const L = [];
+  L.push({ kind: "heading", text: `${isMayday ? "MAYDAY" : "PAR"} — Accountability Check Detail` });
+  L.push({ kind: "text", text: `Started: ${fmtDateTimeShort(event.startedAt)}`, font: "H", size: 9 });
+  L.push({ kind: "text", text: `Completed: ${fmtDateTimeShort(event.completedAt)}`, font: "H", size: 9 });
+  L.push({ kind: "text", text: `${event.checkedUnits} of ${event.totalUnits} units accounted for`, font: "HB", size: 9 });
+  L.push({ kind: "text", text: "", font: "H", size: 9 });
+
+  const hasDetail = event.checkedUnitDetails && event.checkedUnitDetails.length > 0;
+  if (hasDetail) {
+    const checkedRows = event.checkedUnitDetails.map(u => [u.label, u.assignment || "-", u.task || "-", fmtDateTimeShort(u.checkedAt)]);
+    L.push(...tableLines(["UNIT", "ASSIGNMENT", "TASK", "TIME CHECKED"], [100, 140, 140, 130], checkedRows, "Accounted For"));
+    if (event.uncheckedUnitDetails && event.uncheckedUnitDetails.length > 0) {
+      L.push({ kind: "text", text: "", font: "H", size: 9 });
+      const uncheckedRows = event.uncheckedUnitDetails.map(u => [u.label, u.assignment || "-", u.task || "-"]);
+      L.push(...tableLines(["UNIT", "ASSIGNMENT", "TASK"], [100, 140, 140], uncheckedRows, "NOT Accounted For"));
+    }
+  } else {
+    // Older entries recorded before per-unit assignment/task/timestamp
+    // detail was captured — falls back to whatever names alone were
+    // saved, rather than showing a blank report.
+    L.push({ kind: "heading", text: "Accounted For" });
+    wrapPush(L, event.checkedUnitNames && event.checkedUnitNames.length > 0 ? event.checkedUnitNames.join(", ") : "(none recorded)");
+    if (event.uncheckedUnitNames && event.uncheckedUnitNames.length > 0) {
+      L.push({ kind: "text", text: "", font: "H", size: 9 });
+      L.push({ kind: "heading", text: "NOT Accounted For" });
+      wrapPush(L, event.uncheckedUnitNames.join(", "));
+    }
+  }
+
+  const parts = buildSimplePdf(L, logo, { name: incidentName, started: fmtDateTimeShort(event.startedAt) });
+  const blob = new Blob(parts, { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const safeName = (incidentName || "incident").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const stamp = event.completedAt ? new Date(event.completedAt).getTime() : Date.now();
+  a.download = `${safeName}-${isMayday ? "mayday" : "par"}-${stamp}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 async function downloadPacketPdf(data) {
   const logo = await loadLogoRGB(KFD_PATCH_DATA_URI);
   const inc = data.incident || {};
@@ -6361,16 +6511,23 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const completeParSession = (mode) => {
     const session = incident.parSession;
     const checks = session?.checks || {};
-    // Captures the actual unit names on both sides, not just a count
-    // — which units reported in, and just as importantly for a
-    // Mayday specifically, which ones did NOT, so that's preserved in
-    // the record rather than only a "6 of 7" tally.
-    const checkedUnitNames = resources.filter(r => checks[r.id]).map(r => r.label);
-    const uncheckedUnitNames = resources.filter(r => !checks[r.id]).map(r => r.label);
+    // Captures a full snapshot per unit — name, assignment, task, and
+    // the exact moment it was checked — not just a count. Assignment
+    // and task are captured here (rather than looked up later from
+    // the live resource) since a unit's division or task can change
+    // after the fact, and the history should reflect what was true
+    // at the time of THIS event, not whatever it's since become.
+    // checkedUnitNames is kept alongside for the existing summary
+    // views (the list view and the PDF's heading line), which only
+    // need the names, not the full detail.
+    const checkedUnitDetails = resources.filter(r => checks[r.id]).map(r => ({ id: r.id, label: r.label, assignment: r.assignment, task: r.task, checkedAt: checks[r.id] }));
+    const uncheckedUnitDetails = resources.filter(r => !checks[r.id]).map(r => ({ id: r.id, label: r.label, assignment: r.assignment, task: r.task }));
     const entry = {
       id: uid(), type: mode, startedAt: session?.startedAt || nowISO(), completedAt: nowISO(),
-      totalUnits: resources.length, checkedUnits: checkedUnitNames.length,
-      checkedUnitNames, uncheckedUnitNames,
+      totalUnits: resources.length, checkedUnits: checkedUnitDetails.length,
+      checkedUnitDetails, uncheckedUnitDetails,
+      checkedUnitNames: checkedUnitDetails.map(u => u.label),
+      uncheckedUnitNames: uncheckedUnitDetails.map(u => u.label),
     };
     setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory] }));
     setShowMaydayModal(false);
