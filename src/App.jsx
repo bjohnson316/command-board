@@ -565,6 +565,15 @@ function makeTextIcon(text) {
   });
 }
 
+// A short, space-saving label for a division marker's square face —
+// initials for a multi-word name ("Division A" -> "DA"), otherwise
+// the first few letters of a single word ("Staging" -> "STA").
+function shortDivisionLabel(name) {
+  const words = String(name).trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return words.map(w => w[0]).join("").toUpperCase().slice(0, 3);
+  return String(name).slice(0, 3).toUpperCase();
+}
+
 // Dropped from the small draggable cards in TabMapping's Divisions
 // palette — deliberately simple and mostly static (just the name),
 // rather than trying to keep a live unit count baked into the icon
@@ -572,14 +581,17 @@ function makeTextIcon(text) {
 // marker is clicked instead (see onDivisionMarkerClick, wired up in
 // loadGeoJsonIntoGroup below), which avoids needing this map's
 // already-intricate render/sync logic to also watch and react to
-// every change in the Resource Board's resources array.
+// every change in the Resource Board's resources array. A small,
+// fixed-size square (rather than a wider pill sized to the full name)
+// keeps the map itself uncluttered — the full name only appears in
+// the popup on click, along with the current unit list.
 function makeDivisionMarkerIcon(divisionName) {
-  const esc = String(divisionName).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const short = shortDivisionLabel(divisionName);
   return L.divIcon({
     className: "cb-map-division-marker",
-    html: `<div style="background:var(--cb-panel);color:var(--cb-text);border:2px solid var(--cb-amber);border-radius:6px;padding:5px 10px;font:700 11px 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer;">${esc}</div>`,
-    iconSize: null,
-    iconAnchor: [10, 10],
+    html: `<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:var(--cb-panel);color:var(--cb-text);border:2px solid var(--cb-amber);border-radius:4px;font:700 10px 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.02em;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer;">${short}</div>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
   });
 }
 
@@ -2122,7 +2134,17 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       // regardless of any event-propagation subtlety, the same way
       // the freehand tool already disables it while sketching.
       if (mapRef.current) mapRef.current.dragging.disable();
-      movingLayerRef.current = { layer, startLatLng: e.latlng, originalLatLngs: getLayerLatLngs(layer) };
+      // startClientX/Y and moved (set as the pointer actually travels
+      // in handleOverlayPointerMove below) are what let
+      // handleOverlayPointerUp tell a real drag apart from a
+      // stationary click — since the overlay that appears the moment
+      // isMovingShape becomes true intercepts the eventual
+      // pointerup/mouseup before it ever reaches the marker itself,
+      // Leaflet's own click-event synthesis never gets a chance to
+      // run on ANY draggable layer, not just division markers. See
+      // the "if (!moved ...)" branch in handleOverlayPointerUp, which
+      // manually fires the click Leaflet itself couldn't.
+      movingLayerRef.current = { layer, startLatLng: e.latlng, originalLatLngs: getLayerLatLngs(layer), startClientX: e.originalEvent.clientX, startClientY: e.originalEvent.clientY, moved: false };
       setIsMovingShape(true);
     });
   };
@@ -2137,7 +2159,11 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
   // drag-a-division-onto-the-map handler further down.
   const escHtmlMapping = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const onDivisionMarkerClick = (divisionName, layer) => {
-    const units = (latestResourcesRef.current || []).filter(r => (r.assignment || "Unassigned") === divisionName);
+    // columnFor (the same grouping the Resource Board itself uses),
+    // not r.assignment directly — Staging and Rehab are status
+    // values, not assignment values, so a plain assignment check
+    // would never match a unit actually sitting in either of those.
+    const units = (latestResourcesRef.current || []).filter(r => columnFor(r) === divisionName);
     const html = units.length === 0
       ? `<div style="font-size:12px;min-width:140px;"><b>${escHtmlMapping(divisionName)}</b><br/><span style="color:#8B939B;">No units currently assigned.</span></div>`
       : `<div style="font-size:12px;min-width:160px;"><b>${escHtmlMapping(divisionName)}</b><br/>${units.map(u => `${escHtmlMapping(u.label)}${u.task ? ` — ${escHtmlMapping(u.task)}` : ""}`).join("<br/>")}</div>`;
@@ -2410,6 +2436,13 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       const dLat = current.lat - movingLayerRef.current.startLatLng.lat;
       const dLng = current.lng - movingLayerRef.current.startLatLng.lng;
       setLayerLatLngs(movingLayerRef.current.layer, offsetLatLngs(movingLayerRef.current.originalLatLngs, dLat, dLng));
+      // A real device's pointer virtually never sits at the exact
+      // same pixel between press and release, so a small threshold
+      // (not "moved at all") is what still recognizes an intentional
+      // stationary tap as a tap rather than a drag.
+      const dx = e.clientX - movingLayerRef.current.startClientX;
+      const dy = e.clientY - movingLayerRef.current.startClientY;
+      if (Math.hypot(dx, dy) > 6) movingLayerRef.current.moved = true;
       return;
     }
     if (activeTool === "freehand" && freehandStateRef.current) {
@@ -2420,10 +2453,21 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
   };
   const handleOverlayPointerUp = () => {
     if (movingLayerRef.current) {
+      const { layer, moved } = movingLayerRef.current;
       movingLayerRef.current = null;
       if (mapRef.current) mapRef.current.dragging.enable();
       setIsMovingShape(false);
-      persistRef.current();
+      if (moved) {
+        persistRef.current();
+      } else {
+        // Never actually dragged — this overlay swallowing the
+        // release is exactly what prevented Leaflet's own click
+        // event from ever reaching the marker, so fire it manually
+        // instead. Harmless for shape types with no click listener of
+        // their own (fire() on a layer with no matching handler is a
+        // no-op); currently only division markers register one.
+        layer.fire("click");
+      }
       return;
     }
     if (activeTool === "freehand" && freehandStateRef.current) {
@@ -2528,7 +2572,12 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
           {perimeterMessage && <span style={{ color: COLORS.amber, display: "block", marginTop: 4 }}>{perimeterMessage}</span>}
         </div>
         {(() => {
-          const activeDivisions = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+          // Staging and Rehab are real physical locations worth
+          // marking on a map, unlike Out of Service or Released,
+          // which are unit-status designations rather than places —
+          // so only those two get excluded here, not every
+          // STATUS_FLOW column.
+          const activeDivisions = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder).filter(col => col !== "Out of Service" && col !== "Released");
           if (activeDivisions.length === 0) return null;
           return (
             <div style={{ marginBottom: 10 }}>
@@ -2537,7 +2586,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {activeDivisions.map(name => {
-                  const count = resources.filter(r => (r.assignment || "Unassigned") === name).length;
+                  const count = resources.filter(r => columnFor(r) === name).length;
                   const color = assignmentColumnColor(name, activeDivisions);
                   return (
                     <div key={name} onPointerDown={startDivisionDrag(name)}
@@ -5292,15 +5341,15 @@ function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
         ctx.lineWidth = 2;
         ctx.stroke();
       } else if (props.isDivisionMarker) {
-        // Same rounded-box treatment as a text label, but with the
-        // amber border matching the on-map division marker style
-        // (see makeDivisionMarkerIcon) — keeps the PDF export's map
-        // snapshot visually consistent with what's actually shown
-        // live on the Mapping tab.
-        const label = props.divisionName || "";
-        ctx.font = "700 13px Arial, sans-serif";
-        const textW = ctx.measureText(label).width;
-        const boxW = textW + 16, boxH = 22, bx = p.x - boxW / 2, by = p.y - boxH / 2, r = 5;
+        // Small fixed-size square with a short label, matching the
+        // compact on-map marker style (see makeDivisionMarkerIcon) —
+        // keeps the PDF export's map snapshot visually consistent
+        // with what's actually shown live on the Mapping tab. Manual
+        // arcTo corners (not ctx.roundRect) to match this file's
+        // existing rounded-box drawing elsewhere and avoid relying on
+        // a newer canvas API on older devices.
+        const label = shortDivisionLabel(props.divisionName || "");
+        const half = 13, r = 4, bx = p.x - half, by = p.y - half, boxW = half * 2, boxH = half * 2;
         ctx.fillStyle = "#1B1F23";
         ctx.strokeStyle = "#D9A02B";
         ctx.lineWidth = 2;
@@ -5314,8 +5363,9 @@ function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = "#EDEFF1";
+        ctx.font = "700 10px Arial, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText(label, p.x, p.y + 4);
+        ctx.fillText(label, p.x, p.y + 3);
       } else if ("textLabel" in props) {
         ctx.font = "600 13px Arial, sans-serif";
         const textW = ctx.measureText(props.textLabel).width;
