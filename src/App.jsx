@@ -565,6 +565,24 @@ function makeTextIcon(text) {
   });
 }
 
+// Dropped from the small draggable cards in TabMapping's Divisions
+// palette — deliberately simple and mostly static (just the name),
+// rather than trying to keep a live unit count baked into the icon
+// itself. The current unit list is looked up fresh at the moment the
+// marker is clicked instead (see onDivisionMarkerClick, wired up in
+// loadGeoJsonIntoGroup below), which avoids needing this map's
+// already-intricate render/sync logic to also watch and react to
+// every change in the Resource Board's resources array.
+function makeDivisionMarkerIcon(divisionName) {
+  const esc = String(divisionName).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return L.divIcon({
+    className: "cb-map-division-marker",
+    html: `<div style="background:var(--cb-panel);color:var(--cb-text);border:2px solid var(--cb-amber);border-radius:6px;padding:5px 10px;font:700 11px 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer;">${esc}</div>`,
+    iconSize: null,
+    iconAnchor: [10, 10],
+  });
+}
+
 function defaultComms() {
   return {
     dateTimePrepared: "", opFrom: "", opTo: "", specialInstructions: "",
@@ -1929,12 +1947,13 @@ function bindOrUpdatePerimeterTooltip(layer, acres) {
   else layer.bindTooltip(label, { permanent: true, direction: "center", className: "cb-perimeter-tooltip" });
 }
 
-function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable) {
+function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, onDivisionMarkerClick) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
       const props = feature.properties || {};
       if ("radius" in props) return L.circle(latlng, { radius: props.radius });
       if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
+      if (props.isDivisionMarker) return L.marker(latlng, { icon: makeDivisionMarkerIcon(props.divisionName) });
       return L.marker(latlng);
     },
   }).eachLayer(layer => {
@@ -1949,6 +1968,15 @@ function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable) {
     if (props.isPerimeter) {
       layer.__isPerimeter = true;
       bindOrUpdatePerimeterTooltip(layer, perimeterAcres(layer));
+    }
+    if (props.isDivisionMarker) {
+      // __divisionName (not just relying on layer.feature.properties)
+      // is what persist() reads back out on save — toGeoJSON() only
+      // serializes geometry by default, the same reason __textLabel
+      // exists for text labels below.
+      layer.__isDivisionMarker = true;
+      layer.__divisionName = props.divisionName;
+      layer.on("click", () => onDivisionMarkerClick(props.divisionName, layer));
     }
     makeLayerMovable(layer);
   });
@@ -1972,7 +2000,7 @@ function offsetLatLngs(latlngs, dLat, dLng) {
   return L.latLng(latlngs.lat + dLat, latlngs.lng + dLng);
 }
 
-function TabMapping({ mapData, setMapData }) {
+function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourceColumnOrder }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const drawnItemsRef = useRef(null);
@@ -1984,6 +2012,7 @@ function TabMapping({ mapData, setMapData }) {
   const movingLayerRef = useRef(null); // { layer, startLatLng, originalLatLngs } while dragging an existing shape/label
   const editingActiveRef = useRef(false); // true while leaflet-draw's own edit/delete mode is active
   const latestMapDataRef = useRef(mapData); // mirrors the mapData prop for use inside the poll's setInterval closure
+  const latestResourcesRef = useRef(resources); // same pattern, for looking up a division marker's current units at click time without needing to react to every resources change
   const lastSyncedMapDataRef = useRef(null); // JSON string of whatever drawnItems currently reflects
   const textPromptOpenRef = useRef(false); // mirrors textPrompt state, for the same reason as latestMapDataRef
   const perimeterPointsRef = useRef([]); // accumulated GPS fixes while tracing a perimeter
@@ -1997,8 +2026,12 @@ function TabMapping({ mapData, setMapData }) {
   const [isMovingShape, setIsMovingShape] = useState(false); // true while an existing shape/label is being dragged
   const [tracingPerimeter, setTracingPerimeter] = useState(false);
   const [perimeterMessage, setPerimeterMessage] = useState("");
+  // { name, x, y } while a division card is being dragged from the
+  // palette below toward the map; null otherwise.
+  const [draggingDivision, setDraggingDivision] = useState(null);
 
   useEffect(() => { latestMapDataRef.current = mapData; }, [mapData]);
+  useEffect(() => { latestResourcesRef.current = resources; }, [resources]);
   useEffect(() => { textPromptOpenRef.current = !!textPrompt; }, [textPrompt]);
 
   const startTracingPerimeter = () => {
@@ -2094,6 +2127,70 @@ function TabMapping({ mapData, setMapData }) {
     });
   };
 
+  // Looks up the CURRENT units for a division fresh at click time,
+  // rather than anything baked into the marker itself when it was
+  // dropped — so the popup always reflects live Resource Board state
+  // (reassignments, check-ins, releases) without this map needing to
+  // watch and react to every resources change. Defined here at the
+  // component-body level (not nested inside the mount-once map-setup
+  // effect below) so it's usable both there and from the
+  // drag-a-division-onto-the-map handler further down.
+  const escHtmlMapping = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const onDivisionMarkerClick = (divisionName, layer) => {
+    const units = (latestResourcesRef.current || []).filter(r => (r.assignment || "Unassigned") === divisionName);
+    const html = units.length === 0
+      ? `<div style="font-size:12px;min-width:140px;"><b>${escHtmlMapping(divisionName)}</b><br/><span style="color:#8B939B;">No units currently assigned.</span></div>`
+      : `<div style="font-size:12px;min-width:160px;"><b>${escHtmlMapping(divisionName)}</b><br/>${units.map(u => `${escHtmlMapping(u.label)}${u.task ? ` — ${escHtmlMapping(u.task)}` : ""}`).join("<br/>")}</div>`;
+    layer.bindPopup(html).openPopup();
+  };
+
+  // Handles dragging a division card from the palette (rendered
+  // below) onto the map. Uses window-level pointer listeners rather
+  // than native HTML5 drag-and-drop — the same choice already made
+  // for the whole-shape-move feature above, and for the same reason:
+  // native HTML5 DnD has a history of behaving inconsistently across
+  // touch devices in this app, while pointer events are normalized
+  // consistently by the browser across mouse, touch, and pen.
+  const startDivisionDrag = (name) => (e) => {
+    e.preventDefault();
+    setDraggingDivision({ name, x: e.clientX, y: e.clientY });
+  };
+  useEffect(() => {
+    if (!draggingDivision) return;
+    const divisionName = draggingDivision.name;
+    const handleMove = (e) => setDraggingDivision(d => d ? { ...d, x: e.clientX, y: e.clientY } : d);
+    const handleUp = (e) => {
+      const rect = containerRef.current ? containerRef.current.getBoundingClientRect() : null;
+      const overMap = rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (overMap && mapRef.current && drawnItemsRef.current) {
+        const latlng = mapRef.current.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+        const marker = L.marker(latlng, { icon: makeDivisionMarkerIcon(divisionName) });
+        marker.__isDivisionMarker = true;
+        marker.__divisionName = divisionName;
+        marker.on("click", () => onDivisionMarkerClick(divisionName, marker));
+        drawnItemsRef.current.addLayer(marker);
+        makeLayerMovable(marker);
+        persistRef.current();
+      }
+      setDraggingDivision(null);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+    // Deliberately keyed on just the name, not the whole
+    // draggingDivision object — handleMove updates x/y on every
+    // pointer move, and depending on the full object would re-run
+    // this effect (tearing down and re-attaching both window
+    // listeners) on every single one of those moves instead of just
+    // once per drag. handleUp never needs the live x/y from state
+    // anyway, since it reads clientX/clientY directly off the pointer
+    // event that ended the drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingDivision?.name]);
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -2149,6 +2246,7 @@ function TabMapping({ mapData, setMapData }) {
         const feature = layer.toGeoJSON();
         if (layer instanceof L.Circle) feature.properties = { ...feature.properties, radius: layer.getRadius() };
         if (layer.__textLabel) feature.properties = { ...feature.properties, textLabel: layer.__textLabel };
+        if (layer.__isDivisionMarker) feature.properties = { ...feature.properties, isDivisionMarker: true, divisionName: layer.__divisionName };
         features.push(feature);
       });
       const newData = { type: "FeatureCollection", features };
@@ -2162,7 +2260,7 @@ function TabMapping({ mapData, setMapData }) {
     persistRef.current = persist;
 
     if (mapData && mapData.features && mapData.features.length > 0) {
-      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable);
+      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable, onDivisionMarkerClick);
     }
     lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
@@ -2229,7 +2327,7 @@ function TabMapping({ mapData, setMapData }) {
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
       if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
-        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable);
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable, onDivisionMarkerClick);
       }
       lastSyncedMapDataRef.current = incomingJson;
     }, 5000);
@@ -2429,6 +2527,29 @@ function TabMapping({ mapData, setMapData }) {
           {gpsError && <span style={{ color: COLORS.dangerText, display: "block", marginTop: 4 }}>{gpsError}</span>}
           {perimeterMessage && <span style={{ color: COLORS.amber, display: "block", marginTop: 4 }}>{perimeterMessage}</span>}
         </div>
+        {(() => {
+          const activeDivisions = deriveAssignmentColumns(resources, assignmentPresets, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+          if (activeDivisions.length === 0) return null;
+          return (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Drag a division onto the map to mark where it's operating
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {activeDivisions.map(name => {
+                  const count = resources.filter(r => (r.assignment || "Unassigned") === name).length;
+                  const color = assignmentColumnColor(name, activeDivisions);
+                  return (
+                    <div key={name} onPointerDown={startDivisionDrag(name)}
+                      style={{ background: COLORS.panel2, border: `1.5px solid ${color}`, borderRadius: 5, padding: "5px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.03em", cursor: "grab", touchAction: "none", userSelect: "none" }}>
+                      {name} <span style={{ color: COLORS.muted, fontFamily: "'IBM Plex Sans', sans-serif", textTransform: "none", letterSpacing: 0 }}>({count})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
         <div style={{ position: "relative" }}>
           <div ref={containerRef} style={{ width: "100%", height: "65vh", minHeight: 420, borderRadius: 6, border: `1px solid ${COLORS.line}` }} />
           {(activeTool === "text" || activeTool === "freehand" || isMovingShape) && (
@@ -2462,6 +2583,18 @@ function TabMapping({ mapData, setMapData }) {
               onKeyDown={e => { if (e.key === "Enter") confirmTextLabel(); if (e.key === "Escape") setTextPrompt(null); }} />
             <Btn kind="solid" onClick={confirmTextLabel} style={{ width: "100%", justifyContent: "center", marginTop: 12 }}>Place on Map</Btn>
           </div>
+        </div>
+      )}
+
+      {draggingDivision && (
+        <div style={{
+          position: "fixed", left: draggingDivision.x, top: draggingDivision.y, transform: "translate(-50%, -50%)",
+          pointerEvents: "none", zIndex: 3000,
+          background: COLORS.panel2, border: `2px solid ${COLORS.amber}`, borderRadius: 6, padding: "6px 12px",
+          fontFamily: "'Oswald', sans-serif", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em",
+          boxShadow: "0 3px 10px rgba(0,0,0,0.5)",
+        }}>
+          {draggingDivision.name}
         </div>
       )}
     </div>
@@ -5158,6 +5291,31 @@ function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
         ctx.strokeStyle = "#D9A02B";
         ctx.lineWidth = 2;
         ctx.stroke();
+      } else if (props.isDivisionMarker) {
+        // Same rounded-box treatment as a text label, but with the
+        // amber border matching the on-map division marker style
+        // (see makeDivisionMarkerIcon) — keeps the PDF export's map
+        // snapshot visually consistent with what's actually shown
+        // live on the Mapping tab.
+        const label = props.divisionName || "";
+        ctx.font = "700 13px Arial, sans-serif";
+        const textW = ctx.measureText(label).width;
+        const boxW = textW + 16, boxH = 22, bx = p.x - boxW / 2, by = p.y - boxH / 2, r = 5;
+        ctx.fillStyle = "#1B1F23";
+        ctx.strokeStyle = "#D9A02B";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by);
+        ctx.arcTo(bx + boxW, by, bx + boxW, by + boxH, r);
+        ctx.arcTo(bx + boxW, by + boxH, bx, by + boxH, r);
+        ctx.arcTo(bx, by + boxH, bx, by, r);
+        ctx.arcTo(bx, by, bx + boxW, by, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#EDEFF1";
+        ctx.textAlign = "center";
+        ctx.fillText(label, p.x, p.y + 4);
       } else if ("textLabel" in props) {
         ctx.font = "600 13px Arial, sans-serif";
         const textW = ctx.measureText(props.textLabel).width;
@@ -6989,7 +7147,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 resourceColumnOrder={resourceColumnOrder} setResourceColumnOrder={setResourceColumnOrder}
                 onTriggerMayday={() => setShowMaydayConfirm(true)} onStartPar={startPar}
               />}
-              {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} />}
+              {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "weather" && <TabWeather />}
               {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
