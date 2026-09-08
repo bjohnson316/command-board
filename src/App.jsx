@@ -653,7 +653,7 @@ function Btn({ children, onClick, kind = "ghost", icon: Icon, style, type = "but
 
 function Panel({ title, icon: Icon, right, children, style }) {
   return (
-    <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 6, overflow: "hidden", ...style }}>
+    <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 6, overflow: "hidden", display: "flex", flexDirection: "column", ...style }}>
       {title && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 16px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.panel2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Oswald', sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 13, color: COLORS.text }}>
@@ -670,8 +670,17 @@ function Panel({ title, icon: Icon, right, children, style }) {
           down to an unusable width. Since this is the one wrapper
           nearly every section in the app renders its content inside,
           fixing it here covers all of them at once rather than
-          needing a scroll container added to each individual grid. */}
-      <div style={{ padding: 16, overflowX: "auto" }}>{children}</div>
+          needing a scroll container added to each individual grid.
+          flex:1 on this content area (with the outer div now a flex
+          column) is what lets a Panel actually stretch to match
+          taller siblings in a row with alignItems:"stretch" — without
+          it, only the outer border would visually stretch while the
+          content stayed pinned to the top, leaving an empty gap
+          instead of the content itself filling the space. This is a
+          no-op for every other Panel not sitting in a stretched row,
+          since flex:1 only does anything when a parent flex container
+          actually has extra space to distribute. */}
+      <div style={{ padding: 16, overflowX: "auto", flex: 1 }}>{children}</div>
     </div>
   );
 }
@@ -1669,17 +1678,17 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "stretch" }}>
         <Panel title="Check In Resource" icon={Truck} style={{ flex: "2 1 420px" }} right={
           <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
         }>
           <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
         </Panel>
-        <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
+        <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340, maxHeight: 210 }}>
           {realObjectives.length === 0 ? (
             <div style={{ fontSize: 12.5, color: COLORS.faint }}>None set on the Tactical Worksheet yet.</div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 170, overflowY: "auto" }}>
               {realObjectives.map((o, i) => {
                 const isComplete = !!incident.objectivesCompleted[o];
                 return (
@@ -1694,34 +1703,36 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
           )}
         </Panel>
         <Panel title="Accountability" icon={AlertTriangle} style={{ flex: "0 0 180px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%", justifyContent: "center" }}>
             {(() => {
-              // Counts from the last completed PAR if one exists,
-              // otherwise from the incident's own operational start —
-              // the same baseline the 15-minute reminder itself uses
-              // (see the reminder effect in AppInner), so this clock
-              // and when the reminder actually fires always agree.
+              // Counts down toward when the NEXT PAR will be due,
+              // rather than up from the last one — baseline is the
+              // same one the 15-minute reminder itself uses (last
+              // completed PAR, or the incident's own operational
+              // start if none has been taken yet), so this clock and
+              // when the reminder actually fires can never disagree.
               const parBaseline = incident.lastParAt || incident.opStart;
-              const minutesSince = parBaseline ? (now - new Date(parBaseline).getTime()) / 60000 : 0;
-              const isOverdue = minutesSince >= (parIntervalMinutes || 15);
+              const intervalMs = (parIntervalMinutes || 15) * 60000;
+              const remainingMs = parBaseline ? intervalMs - (now - new Date(parBaseline).getTime()) : intervalMs;
+              const isOverdue = remainingMs <= 0;
               return (
-                <div style={{ textAlign: "center", padding: "6px 4px 2px" }}>
-                  <div style={{ fontSize: 10.5, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Time Since Last PAR</div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: isOverdue ? COLORS.red : COLORS.text }}>
-                    {parBaseline ? elapsed(parBaseline, now) : "—"}
+                <div style={{ textAlign: "center", padding: "2px 4px" }}>
+                  <div style={{ fontSize: 10, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Next PAR Due</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 19, fontWeight: 700, color: isOverdue ? COLORS.red : COLORS.text }}>
+                    {parBaseline ? (isOverdue ? "OVERDUE" : fmtDuration(remainingMs)) : "—"}
                   </div>
                 </div>
               );
             })()}
             <button onClick={onTriggerMayday}
-              style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 6, padding: "16px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 17, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
+              style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 5, padding: "8px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
               Mayday
             </button>
             <button onClick={onStartPar}
-              style={{ background: COLORS.amber, color: "#191C1F", border: "none", borderRadius: 6, padding: "13px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 15, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
+              style={{ background: COLORS.amber, color: "#191C1F", border: "none", borderRadius: 5, padding: "6px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 700, cursor: "pointer" }}>
               PAR
             </button>
-            <Btn kind="ghost" onClick={() => setShowParHistory(true)} style={{ width: "100%", justifyContent: "center", fontSize: 12.5 }}>View History</Btn>
+            <Btn kind="ghost" onClick={() => setShowParHistory(true)} style={{ width: "100%", justifyContent: "center", fontSize: 11.5, padding: "5px 10px" }}>View History</Btn>
           </div>
         </Panel>
       </div>
