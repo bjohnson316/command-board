@@ -1453,7 +1453,7 @@ function ManageResourcesModal({
   );
 }
 
-function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType }) {
+function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType, tasksByType }) {
   const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "", task: "" });
   const [deptId, setDeptId] = useState("");
   const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
@@ -1468,6 +1468,9 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   // assignment still shows until someone opts a type into filtering.
   const typeFilter = assignmentsByType && incidentType ? assignmentsByType[incidentType] : null;
   const filteredAssignmentPresets = (typeFilter && typeFilter.length > 0) ? typeFilter : assignmentPresets;
+  // Same filtering pattern, for the Task dropdown below.
+  const taskTypeFilter = tasksByType && incidentType ? tasksByType[incidentType] : null;
+  const filteredTaskPresets = (taskTypeFilter && taskTypeFilter.length > 0) ? taskTypeFilter : taskPresets;
 
   const submit = () => {
     // Assignment/Division is required (not just recommended) now that
@@ -1584,7 +1587,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
             else setF({ ...f, task: e.target.value });
           }} style={{ width: 180 }}>
             <option value="">Select task...</option>
-            {taskPresets.map(t => <option key={t} value={t}>{t}</option>)}
+            {filteredTaskPresets.map(t => <option key={t} value={t}>{t}</option>)}
             <option value="__add_new__">+ Add Task</option>
           </Select>
         )}
@@ -1596,7 +1599,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   );
 }
 
-function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging, assignmentPresets, assignmentsByType, incidentType }) {
+function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging, assignmentPresets, assignmentsByType, taskPresets, tasksByType, incidentType }) {
   const [editing, setEditing] = useState(false);
   const nextOptions = STATUS_FLOW.filter(s => s !== r.status);
   // When currently parked in one of the four status columns, offer an
@@ -1614,6 +1617,10 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   const typeFilter = assignmentsByType && incidentType ? assignmentsByType[incidentType] : null;
   const baseAssignmentOptions = (typeFilter && typeFilter.length > 0) ? typeFilter : (assignmentPresets || []);
   const cardAssignmentOptions = (r.assignment && !baseAssignmentOptions.includes(r.assignment)) ? [r.assignment, ...baseAssignmentOptions] : baseAssignmentOptions;
+  // Same pattern, for the inline Task field below.
+  const taskTypeFilter = tasksByType && incidentType ? tasksByType[incidentType] : null;
+  const baseTaskOptions = (taskTypeFilter && taskTypeFilter.length > 0) ? taskTypeFilter : (taskPresets || []);
+  const cardTaskOptions = (r.task && !baseTaskOptions.includes(r.task)) ? [r.task, ...baseTaskOptions] : baseTaskOptions;
   // Once released, the timer stops accruing — freeze it at the moment
   // of release instead of continuing to tick against real time.
   const cardNow = r.status === "Released" ? new Date(r.statusSince).getTime() : now;
@@ -1654,7 +1661,10 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
             <option value="">Select assignment...</option>
             {cardAssignmentOptions.map(a => <option key={a} value={a}>{a}</option>)}
           </Select>
-          <TextInput placeholder="Task" defaultValue={r.task} onBlur={e => onUpdate(r.id, { task: e.target.value })} />
+          <Select value={r.task} onChange={e => onUpdate(r.id, { task: e.target.value })}>
+            <option value="">Select task...</option>
+            {cardTaskOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </Select>
           <TextArea placeholder="Notes" defaultValue={r.notes} onBlur={e => onUpdate(r.id, { notes: e.target.value })} style={{ minHeight: 44 }} />
           <Btn kind="subtle" onClick={() => setEditing(false)}>Done</Btn>
         </div>
@@ -1672,7 +1682,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, incident, setIncident, parIntervalMinutes, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, assignmentsByType, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
+function TabResources({ resources, setResources, now, incident, setIncident, parIntervalMinutes, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, assignmentsByType, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, tasksByType, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1759,7 +1769,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
         <Panel title="Check In Resource" icon={Truck} style={{ flex: "2 1 420px" }} right={
           <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
         }>
-          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} incidentType={incident.type} assignmentsByType={assignmentsByType} />
+          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} incidentType={incident.type} assignmentsByType={assignmentsByType} tasksByType={tasksByType} />
         </Panel>
         <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
           {realObjectives.length === 0 ? (
@@ -1857,7 +1867,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
               {items.map(r => (
                 <ResourceCard key={r.id} r={r} onMove={moveResourceToColumn} onUpdate={updateResource} onRemove={removeResource} now={now}
-                  assignmentPresets={assignmentPresets} assignmentsByType={assignmentsByType} incidentType={incident.type}
+                  assignmentPresets={assignmentPresets} assignmentsByType={assignmentsByType} taskPresets={taskPresets} tasksByType={tasksByType} incidentType={incident.type}
                   isDragging={drag && drag.id === r.id}
                   dragProps={{
                     onPointerDown: (e) => handlePointerDown(r, e),
@@ -5977,6 +5987,50 @@ function ManageAssignmentsByTypeModal({ onClose, onBack, incidentTypes, assignme
   );
 }
 
+// Same pattern as ManageAssignmentsByTypeModal above, for the task
+// dropdown instead.
+function ManageTasksByTypeModal({ onClose, onBack, incidentTypes, taskPresets, tasksByType, onToggle }) {
+  const [selectedCategory, setSelectedCategory] = useState(incidentTypes[0] || "");
+  const selected = tasksByType[selectedCategory] || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 400, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Tasks by Incident Type</span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          Pick which of the existing tasks show up at check-in for each incident type. Leaving none checked for a type shows every task for that type instead — this only narrows the list once you've actually picked some.
+        </div>
+        {incidentTypes.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint }}>No incident types set up yet — add some under Manage Incident Types first.</div>
+        ) : taskPresets.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint }}>No tasks set up yet — add some under Manage Resources first.</div>
+        ) : (
+          <>
+            <Field label="Incident Type">
+              <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+                {incidentTypes.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </Field>
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              {taskPresets.map(t => (
+                <label key={t} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, cursor: "pointer" }}>
+                  <input type="checkbox" checked={selected.includes(t)} onChange={() => onToggle(selectedCategory, t)} style={{ width: 15, height: 15 }} />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
@@ -6006,7 +6060,7 @@ function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRen
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives, onManageAssignmentsByType, onManageParSettings }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives, onManageAssignmentsByType, onManageTasksByType, onManageParSettings }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -6021,6 +6075,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
           <Btn kind="ghost" icon={Settings} onClick={onManageResources} style={{ width: "100%", justifyContent: "center" }}>Manage Resources</Btn>
           <Btn kind="ghost" icon={Star} onClick={onManageObjectives} style={{ width: "100%", justifyContent: "center" }}>Manage Objectives</Btn>
           <Btn kind="ghost" icon={Layers} onClick={onManageAssignmentsByType} style={{ width: "100%", justifyContent: "center" }}>Assignments by Incident Type</Btn>
+          <Btn kind="ghost" icon={CheckCircle2} onClick={onManageTasksByType} style={{ width: "100%", justifyContent: "center" }}>Tasks by Incident Type</Btn>
           <Btn kind="ghost" icon={AlertTriangle} onClick={onManageParSettings} style={{ width: "100%", justifyContent: "center" }}>PAR / Mayday Settings</Btn>
         </div>
       </div>
@@ -6547,11 +6602,12 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [manageResourcesFromAdmin, setManageResourcesFromAdmin] = useState(false);
   const [showManageObjectives, setShowManageObjectives] = useState(false);
   const [showManageAssignmentsByType, setShowManageAssignmentsByType] = useState(false);
+  const [showManageTasksByType, setShowManageTasksByType] = useState(false);
   const [showParSettings, setShowParSettings] = useState(false);
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], objectivesByType: {}, assignmentsByType: {}, tasks: [], parIntervalMinutes: 15 });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], objectivesByType: {}, assignmentsByType: {}, tasksByType: {}, tasks: [], parIntervalMinutes: 15 });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -6661,9 +6717,12 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // see the fallback in ResourceForm, which shows every
       // assignment for any type that hasn't had a filter set up.
       const assignmentsByType = p.assignmentsByType || {};
+      // Same membership-map pattern as assignmentsByType above, for
+      // the task dropdown instead.
+      const tasksByType = p.tasksByType || {};
       const tasks = p.tasks || [];
       const parIntervalMinutes = p.parIntervalMinutes || 15;
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, assignmentsByType, tasks, parIntervalMinutes });
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, assignmentsByType, tasksByType, tasks, parIntervalMinutes });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -6847,12 +6906,23 @@ function AppInner({ onLock, theme, toggleTheme }) {
     savePresets(next);
   };
   const renameTaskPreset = (oldName, newName) => {
-    const next = { ...presets, tasks: presets.tasks.map(t => t === oldName ? newName : t) };
+    // Keeps tasksByType in sync — same reasoning as
+    // renameAssignmentPreset above.
+    const renamedByType = {};
+    Object.keys(presets.tasksByType).forEach(type => {
+      renamedByType[type] = presets.tasksByType[type].map(t => t === oldName ? newName : t);
+    });
+    const next = { ...presets, tasks: presets.tasks.map(t => t === oldName ? newName : t), tasksByType: renamedByType };
     setPresets(next);
     savePresets(next);
   };
   const deleteTaskPreset = (name) => {
-    const next = { ...presets, tasks: presets.tasks.filter(t => t !== name) };
+    // Same reasoning as deleteAssignmentPreset above.
+    const clearedByType = {};
+    Object.keys(presets.tasksByType).forEach(type => {
+      clearedByType[type] = presets.tasksByType[type].filter(t => t !== name);
+    });
+    const next = { ...presets, tasks: presets.tasks.filter(t => t !== name), tasksByType: clearedByType };
     setPresets(next);
     savePresets(next);
   };
@@ -7038,6 +7108,14 @@ function AppInner({ onLock, theme, toggleTheme }) {
     const current = presets.assignmentsByType[type] || [];
     const nextList = current.includes(assignmentName) ? current.filter(a => a !== assignmentName) : [...current, assignmentName];
     const next = { ...presets, assignmentsByType: { ...presets.assignmentsByType, [type]: nextList } };
+    setPresets(next);
+    savePresets(next);
+  };
+  // Same as toggleAssignmentForType above, for the task dropdown.
+  const toggleTaskForType = (type, taskName) => {
+    const current = presets.tasksByType[type] || [];
+    const nextList = current.includes(taskName) ? current.filter(t => t !== taskName) : [...current, taskName];
+    const next = { ...presets, tasksByType: { ...presets.tasksByType, [type]: nextList } };
     setPresets(next);
     savePresets(next);
   };
@@ -7383,7 +7461,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
                 onOpenManageResources={() => setShowManageResourcesAuth(true)}
-                taskPresets={presets.tasks} onSaveTaskPreset={saveTaskPreset}
+                taskPresets={presets.tasks} tasksByType={presets.tasksByType} onSaveTaskPreset={saveTaskPreset}
                 resourceColumnOrder={resourceColumnOrder} setResourceColumnOrder={setResourceColumnOrder}
                 onTriggerMayday={() => setShowMaydayConfirm(true)} onStartPar={startPar}
               />}
@@ -7495,6 +7573,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onManageResources={() => { setShowAdminMenu(false); setManageResourcesFromAdmin(true); setShowManageResources(true); }}
           onManageObjectives={() => { setShowAdminMenu(false); setShowManageObjectives(true); }}
           onManageAssignmentsByType={() => { setShowAdminMenu(false); setShowManageAssignmentsByType(true); }}
+          onManageTasksByType={() => { setShowAdminMenu(false); setShowManageTasksByType(true); }}
           onManageParSettings={() => { setShowAdminMenu(false); setShowParSettings(true); }}
         />
       )}
@@ -7538,6 +7617,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
           assignmentPresets={presets.assignments}
           assignmentsByType={presets.assignmentsByType}
           onToggle={toggleAssignmentForType}
+        />
+      )}
+      {showManageTasksByType && (
+        <ManageTasksByTypeModal
+          onClose={() => setShowManageTasksByType(false)}
+          onBack={() => { setShowManageTasksByType(false); setShowAdminMenu(true); }}
+          incidentTypes={presets.incidentTypes}
+          taskPresets={presets.tasks}
+          tasksByType={presets.tasksByType}
+          onToggle={toggleTaskForType}
         />
       )}
       {showManageResourcesAuth && (
