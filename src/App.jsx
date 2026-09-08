@@ -375,6 +375,13 @@ function blankIncident() {
     // an ignored reminder is just as visible a record as a completed
     // check, not silently invisible.
     ignoredParReminders: [],
+    // Shared across every device watching this incident (via the
+    // normal incident sync, not the dedicated fast Mayday channel --
+    // this doesn't need instant delivery the way a Mayday does) so
+    // completing a PAR or dismissing the reminder on ANY device clears
+    // it everywhere at once, rather than each device independently
+    // deciding for itself whether the reminder is currently showing.
+    parReminderActive: false,
     actionsLog: [],
     resourceOrders: [],
     mapSketch: "",
@@ -408,6 +415,13 @@ function normalizeIncident(inc) {
     lastParAt: "",
     parHistory: [],
     ignoredParReminders: [],
+    // Shared across every device watching this incident (via the
+    // normal incident sync, not the dedicated fast Mayday channel --
+    // this doesn't need instant delivery the way a Mayday does) so
+    // completing a PAR or dismissing the reminder on ANY device clears
+    // it everywhere at once, rather than each device independently
+    // deciding for itself whether the reminder is currently showing.
+    parReminderActive: false,
     ...migrated,
   };
 }
@@ -2384,7 +2398,7 @@ function TabMapping({ mapData, setMapData }) {
           gpsAccuracyRef.current.setLatLng(latlng);
           gpsAccuracyRef.current.setRadius(accuracy);
         }
-        if (firstFix) { mapRef.current.setView(latlng, 16); firstFix = false; }
+        if (firstFix) { mapRef.current.setView(latlng, 18); firstFix = false; }
       },
       (err) => setGpsError(err.code === 1 ? "Location permission denied." : "Couldn't get GPS location."),
       { enableHighAccuracy: true, maximumAge: 5000 }
@@ -6218,7 +6232,6 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // Mayday starts, so a silenced alarm from a past Mayday can't
   // accidentally suppress a brand new one.
   const [alarmSilenced, setAlarmSilenced] = useState(false);
-  const [parReminderDue, setParReminderDue] = useState(false);
   // Covers two gaps: (1) this device skipping the PIN screen entirely
   // via the grace period (see PinGate.jsx), meaning
   // unlockAudioContext was never called from there, and (2) iOS
@@ -6540,10 +6553,9 @@ function AppInner({ onLock, theme, toggleTheme }) {
       checkedUnitNames: checkedUnitDetails.map(u => u.label),
       uncheckedUnitNames: uncheckedUnitDetails.map(u => u.label),
     };
-    setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory] }));
+    setIncident(prev => ({ ...prev, parSession: null, lastParAt: nowISO(), parHistory: [entry, ...prev.parHistory], parReminderActive: false }));
     setShowMaydayModal(false);
     setShowParModal(false);
-    setParReminderDue(false);
     if (mode === "mayday" && incident.id) clearMaydayAlert(incident.id).catch(() => console.error("Failed to clear the Mayday alert on other devices."));
   };
   const closeParModal = () => {
@@ -6557,8 +6569,15 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // both the history view and the PDF export rather than leaving an
   // ignored reminder invisible.
   const dismissParReminder = () => {
-    setIncident(prev => ({ ...prev, ignoredParReminders: [{ id: uid(), at: nowISO() }, ...prev.ignoredParReminders] }));
-    setParReminderDue(false);
+    // Recording the ignored-reminder entry and clearing the shared
+    // active flag together, in a single update — so dismissing on any
+    // one device clears the popup on every device at once, not just
+    // locally.
+    setIncident(prev => ({
+      ...prev,
+      ignoredParReminders: [{ id: uid(), at: nowISO() }, ...prev.ignoredParReminders],
+      parReminderActive: false,
+    }));
   };
   const addResourceKind = (name) => {
     const trimmed = name.trim();
@@ -6779,8 +6798,10 @@ function AppInner({ onLock, theme, toggleTheme }) {
 
   // Periodic PAR reminder — counts from the last completed PAR
   // (lastParAt), checked once a minute against the admin-configured
-  // interval. Resets automatically once a PAR is actually completed
-  // (see completeParSession).
+  // interval. Sets the SHARED incident.parReminderActive flag rather
+  // than local state, so the popup appears in sync across every
+  // device watching this incident, not independently computed and
+  // potentially disagreeing on each one.
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
     const checkDue = () => {
@@ -6792,12 +6813,15 @@ function AppInner({ onLock, theme, toggleTheme }) {
       const baseline = incident.lastParAt || incident.opStart;
       if (!baseline) return;
       const minutesSince = (Date.now() - new Date(baseline).getTime()) / 60000;
-      if (minutesSince >= (presets.parIntervalMinutes || 15)) setParReminderDue(true);
+      const isDue = minutesSince >= (presets.parIntervalMinutes || 15);
+      if (isDue && !incident.parReminderActive) {
+        setIncident(prev => ({ ...prev, parReminderActive: true }));
+      }
     };
     checkDue();
     const interval = setInterval(checkDue, 60 * 1000);
     return () => clearInterval(interval);
-  }, [ready, incidentLoaded, incident.lastParAt, incident.opStart, presets.parIntervalMinutes]);
+  }, [ready, incidentLoaded, incident.lastParAt, incident.opStart, incident.parReminderActive, presets.parIntervalMinutes]);
 
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
@@ -7050,7 +7074,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onClose={closeParModal}
         />
       )}
-      {parReminderDue && !showMaydayModal && !showParModal && (
+      {incident.parReminderActive && !showMaydayModal && !showParModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 92, padding: 16 }}>
           <div style={{ background: COLORS.panel, border: `2px solid ${COLORS.amber}`, borderRadius: 8, width: 360, maxWidth: "100%", padding: 20, textAlign: "center" }}>
             <div style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 16, marginBottom: 8 }}>PAR Reminder</div>
@@ -7058,7 +7082,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
               It's been {presets.parIntervalMinutes || 15}+ minutes since the last accountability check. Take a PAR now?
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn kind="solid" onClick={() => { setParReminderDue(false); startPar(); }} style={{ flex: 1, justifyContent: "center" }}>Take PAR Now</Btn>
+              <Btn kind="solid" onClick={startPar} style={{ flex: 1, justifyContent: "center" }}>Take PAR Now</Btn>
               <Btn kind="ghost" onClick={dismissParReminder}>Dismiss</Btn>
             </div>
           </div>
