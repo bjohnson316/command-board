@@ -348,7 +348,7 @@ function blankIncident() {
     id: uid(),
     name: "",
     number: "",
-    type: "Structure Fire",
+    type: "",
     location: "",
     icName: "",
     preparedBy: "",
@@ -834,6 +834,12 @@ function Tab201({ incident, setIncident, resources, incidentTypePresets, objecti
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14 }}>
           <Field label="Incident Type">
             <Select value={incident.type} onChange={e => handleTypeChange(e.target.value)}>
+              {/* Placeholder for a brand-new incident with no type
+                  chosen yet — matches incident.type's own default of
+                  "" in blankIncident, so the dropdown correctly shows
+                  this rather than silently defaulting to whatever
+                  option happens to be listed first. */}
+              <option value="">Select Incident Type</option>
               {/* Covers the case where this incident's current type was
                   since deleted from the preset list (e.g. by an admin,
                   or from an older save) — rendered as an extra option
