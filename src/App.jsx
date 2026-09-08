@@ -1806,6 +1806,21 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
                   </div>
                 );
               }
+              // Same reasoning as the incident-type case above — while
+              // the incident clock is stopped (see Stop/Resume Clock;
+              // incident.opEnd is set while stopped), the reminder
+              // itself won't fire (see the checkDue effect), so
+              // showing a live countdown — or worse, red "OVERDUE" —
+              // here would be actively misleading about whether
+              // anything is actually about to happen.
+              if (incident.opEnd) {
+                return (
+                  <div style={{ textAlign: "center", padding: "2px 4px" }}>
+                    <div style={{ fontSize: 10, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Next PAR Due</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: COLORS.faint }}>Clock stopped</div>
+                  </div>
+                );
+              }
               // Counts down toward when the NEXT PAR will be due,
               // rather than up from the last one — baseline is the
               // same one the 15-minute reminder itself uses (last
@@ -7313,6 +7328,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
         if (incident.parReminderActive) setIncident(prev => ({ ...prev, parReminderActive: false }));
         return;
       }
+      // Same reasoning again — if the incident clock has been
+      // explicitly stopped (see the Stop/Resume Clock button;
+      // incident.opEnd is set while stopped), there's no active
+      // operational period to be reminding about, so a currently-due
+      // reminder gets cleared here too rather than continuing to nag
+      // during a stopped incident.
+      if (incident.opEnd) {
+        if (incident.parReminderActive) setIncident(prev => ({ ...prev, parReminderActive: false }));
+        return;
+      }
       // Counts from the last completed PAR if one exists, otherwise
       // from the incident's own operational start time — so a long
       // incident where nobody has taken a first PAR yet still gets
@@ -7329,7 +7354,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     checkDue();
     const interval = setInterval(checkDue, 60 * 1000);
     return () => clearInterval(interval);
-  }, [ready, incidentLoaded, incident.type, incident.lastParAt, incident.opStart, incident.parReminderActive, presets.parIntervalMinutes]);
+  }, [ready, incidentLoaded, incident.type, incident.lastParAt, incident.opStart, incident.opEnd, incident.parReminderActive, presets.parIntervalMinutes]);
 
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
