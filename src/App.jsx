@@ -577,14 +577,14 @@ function shortDivisionLabel(name) {
 // Dropped from the small draggable cards in TabMapping's Divisions
 // palette — deliberately simple and mostly static (just the name),
 // rather than trying to keep a live unit count baked into the icon
-// itself. The current unit list is looked up fresh at the moment the
-// marker is clicked instead (see onDivisionMarkerClick, wired up in
-// loadGeoJsonIntoGroup below), which avoids needing this map's
-// already-intricate render/sync logic to also watch and react to
-// every change in the Resource Board's resources array. A small,
-// fixed-size square (rather than a wider pill sized to the full name)
-// keeps the map itself uncluttered — the full name only appears in
-// the popup on click, along with the current unit list.
+// itself. The current unit list is looked up fresh on hover instead
+// (see bindDivisionTooltip, wired up in loadGeoJsonIntoGroup below),
+// which avoids needing this map's already-intricate render/sync
+// logic to also watch and react to every change in the Resource
+// Board's resources array. A small, fixed-size square (rather than a
+// wider pill sized to the full name) keeps the map itself
+// uncluttered — the full name only appears in
+// the tooltip on hover, along with the current unit list.
 function makeDivisionMarkerIcon(divisionName, color) {
   const short = shortDivisionLabel(divisionName);
   return L.divIcon({
@@ -1959,7 +1959,7 @@ function bindOrUpdatePerimeterTooltip(layer, acres) {
   else layer.bindTooltip(label, { permanent: true, direction: "center", className: "cb-perimeter-tooltip" });
 }
 
-function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, onDivisionMarkerClick, getDivisionColor) {
+function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, bindDivisionTooltip, getDivisionColor) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
       const props = feature.properties || {};
@@ -1988,7 +1988,7 @@ function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, onDivisio
       // exists for text labels below.
       layer.__isDivisionMarker = true;
       layer.__divisionName = props.divisionName;
-      layer.on("click", () => onDivisionMarkerClick(props.divisionName, layer));
+      bindDivisionTooltip(props.divisionName, layer);
     }
     makeLayerMovable(layer);
   });
@@ -2162,21 +2162,32 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
   // effect below) so it's usable both there and from the
   // drag-a-division-onto-the-map handler further down.
   const escHtmlMapping = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const onDivisionMarkerClick = (divisionName, layer) => {
-    // columnFor (the same grouping the Resource Board itself uses),
-    // not r.assignment directly — Staging and Rehab are status
-    // values, not assignment values, so a plain assignment check
-    // would never match a unit actually sitting in either of those.
-    const units = (latestResourcesRef.current || []).filter(r => columnFor(r) === divisionName);
-    const html = units.length === 0
-      ? `<div style="font-size:12px;min-width:140px;"><b>${escHtmlMapping(divisionName)}</b><br/><span style="color:#8B939B;">No units currently assigned.</span></div>`
-      : `<div style="font-size:12px;min-width:160px;"><b>${escHtmlMapping(divisionName)}</b><br/>${units.map(u => `${escHtmlMapping(u.label)}${u.task ? ` — ${escHtmlMapping(u.task)}` : ""}`).join("<br/>")}</div>`;
-    layer.bindPopup(html).openPopup();
+  // Binds a tooltip ONCE at marker creation (called from
+  // loadGeoJsonIntoGroup's eachLayer loop and the drop handler below)
+  // rather than a click handler — Leaflet's Tooltip automatically
+  // shows/hides on the marker's own mouseover/mouseout once bound, no
+  // manual event wiring needed the way the old click-driven popup
+  // required. Content is refreshed on every mouseover rather than
+  // fixed at bind time, since the unit list is live.
+  const bindDivisionTooltip = (divisionName, layer) => {
+    layer.bindTooltip("", { direction: "top", offset: [0, -14], opacity: 0.97 });
+    layer.on("mouseover", () => {
+      // columnFor (the same grouping the Resource Board itself uses),
+      // not r.assignment directly — Staging and Rehab are status
+      // values, not assignment values, so a plain assignment check
+      // would never match a unit actually sitting in either of those.
+      const units = (latestResourcesRef.current || []).filter(r => columnFor(r) === divisionName);
+      const html = units.length === 0
+        ? `<div style="font-size:12px;min-width:140px;"><b>${escHtmlMapping(divisionName)}</b><br/><span style="color:#8B939B;">No units currently assigned.</span></div>`
+        : `<div style="font-size:12px;min-width:160px;"><b>${escHtmlMapping(divisionName)}</b><br/>${units.map(u => `${escHtmlMapping(u.label)}${u.task ? ` — ${escHtmlMapping(u.task)}` : ""}`).join("<br/>")}</div>`;
+      layer.setTooltipContent(html);
+    });
   };
 
   // Same color a division's palette card uses (assignmentColumnColor
   // cycles by position in the CURRENT list of active columns, the
   // same way the Resource Board itself colors things) — reads from
+  // refs rather than closing directly over the resources/
   // refs rather than closing directly over the resources/
   // assignmentPresets/resourceColumnOrder props so this always
   // reflects live data even when called from a closure that was
@@ -2210,7 +2221,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
         const marker = L.marker(latlng, { icon: makeDivisionMarkerIcon(divisionName, getDivisionColor(divisionName)) });
         marker.__isDivisionMarker = true;
         marker.__divisionName = divisionName;
-        marker.on("click", () => onDivisionMarkerClick(divisionName, marker));
+        bindDivisionTooltip(divisionName, marker);
         drawnItemsRef.current.addLayer(marker);
         makeLayerMovable(marker);
         persistRef.current();
@@ -2303,7 +2314,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
     persistRef.current = persist;
 
     if (mapData && mapData.features && mapData.features.length > 0) {
-      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable, onDivisionMarkerClick, getDivisionColor);
+      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable, bindDivisionTooltip, getDivisionColor);
     }
     lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
@@ -2370,7 +2381,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
       if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
-        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable, onDivisionMarkerClick, getDivisionColor);
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable, bindDivisionTooltip, getDivisionColor);
       }
       lastSyncedMapDataRef.current = incomingJson;
     }, 5000);
