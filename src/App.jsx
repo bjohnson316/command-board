@@ -178,6 +178,19 @@ const INCIDENT_TYPES = [
 // list can't keep a fixed per-entry color the way this hardcoded
 // array originally did.
 const INCIDENT_TYPE_COLOR_PALETTE = [COLORS.red, COLORS.teal, "#8B5CF6", COLORS.blue, COLORS.slate, COLORS.amber, COLORS.orange];
+// Gates the automatic PAR clock/reminder (NOT the manual Mayday/PAR
+// buttons, which stay available regardless of incident type) — only
+// counts toward and reminds for these incident types, per policy.
+// Matches loosely (substring, case-insensitive) rather than an exact
+// string, since incidentTypes is a user-editable preset list (see
+// INCIDENT_TYPES above, used only to seed it) — a department may have
+// renamed or reworded their "All-Hazard / Other" entry, and this
+// should still recognize it rather than silently stop working the
+// moment someone edits the label in Admin.
+function requiresParTracking(incidentType) {
+  const t = String(incidentType || "").toLowerCase();
+  return t.includes("structure fire") || t.includes("hazmat") || t.includes("all-hazard") || t.includes("all hazard");
+}
 function incidentTypeColor(type, typeList) {
   const idx = (typeList || []).indexOf(type);
   return idx === -1 ? COLORS.slate : INCIDENT_TYPE_COLOR_PALETTE[idx % INCIDENT_TYPE_COLOR_PALETTE.length];
@@ -1749,6 +1762,14 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
         <Panel title="Accountability" icon={AlertTriangle} style={{ flex: "0 0 180px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%", justifyContent: "center" }}>
             {(() => {
+              if (!requiresParTracking(incident.type)) {
+                return (
+                  <div style={{ textAlign: "center", padding: "2px 4px" }}>
+                    <div style={{ fontSize: 10, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Next PAR Due</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: COLORS.faint }}>N/A for this incident type</div>
+                  </div>
+                );
+              }
               // Counts down toward when the NEXT PAR will be due,
               // rather than up from the last one — baseline is the
               // same one the 15-minute reminder itself uses (last
@@ -7065,6 +7086,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
     const checkDue = () => {
+      // Gated to only the incident types where PAR tracking is
+      // required by policy — see requiresParTracking. If the current
+      // type doesn't qualify and a reminder somehow is still active
+      // (e.g. the type was just changed away from a qualifying one
+      // mid-incident), clear it rather than leaving a stale reminder
+      // active for a type that shouldn't have one at all.
+      if (!requiresParTracking(incident.type)) {
+        if (incident.parReminderActive) setIncident(prev => ({ ...prev, parReminderActive: false }));
+        return;
+      }
       // Counts from the last completed PAR if one exists, otherwise
       // from the incident's own operational start time — so a long
       // incident where nobody has taken a first PAR yet still gets
@@ -7081,7 +7112,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     checkDue();
     const interval = setInterval(checkDue, 60 * 1000);
     return () => clearInterval(interval);
-  }, [ready, incidentLoaded, incident.lastParAt, incident.opStart, incident.parReminderActive, presets.parIntervalMinutes]);
+  }, [ready, incidentLoaded, incident.type, incident.lastParAt, incident.opStart, incident.parReminderActive, presets.parIntervalMinutes]);
 
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
