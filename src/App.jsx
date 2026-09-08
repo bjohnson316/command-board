@@ -1684,7 +1684,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
         }>
           <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
         </Panel>
-        <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340, maxHeight: 210 }}>
+        <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
           {realObjectives.length === 0 ? (
             <div style={{ fontSize: 12.5, color: COLORS.faint }}>None set on the Tactical Worksheet yet.</div>
           ) : (
