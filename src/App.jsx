@@ -1453,7 +1453,7 @@ function ManageResourcesModal({
   );
 }
 
-function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset }) {
+function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType }) {
   const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "", task: "" });
   const [deptId, setDeptId] = useState("");
   const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
@@ -1461,6 +1461,13 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   const [checkInError, setCheckInError] = useState("");
 
   const selectedDept = departments.find(d => d.id === deptId) || null;
+  // Narrows to the subset configured for the current incident type
+  // under Admin -> Assignments by Incident Type, if one has actually
+  // been set up for it — an empty/missing filter for a type means
+  // "not configured yet", not "nothing available", so every
+  // assignment still shows until someone opts a type into filtering.
+  const typeFilter = assignmentsByType && incidentType ? assignmentsByType[incidentType] : null;
+  const filteredAssignmentPresets = (typeFilter && typeFilter.length > 0) ? typeFilter : assignmentPresets;
 
   const submit = () => {
     // Assignment/Division is required (not just recommended) now that
@@ -1558,7 +1565,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
             else setF({ ...f, assignment: e.target.value });
           }} style={{ width: 180 }}>
             <option value="">Select assignment...</option>
-            {assignmentPresets.map(a => <option key={a} value={a}>{a}</option>)}
+            {filteredAssignmentPresets.map(a => <option key={a} value={a}>{a}</option>)}
             <option value="__add_new__">+ Add Assignment</option>
           </Select>
         )}
@@ -1589,7 +1596,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   );
 }
 
-function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging }) {
+function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDragging, assignmentPresets, assignmentsByType, incidentType }) {
   const [editing, setEditing] = useState(false);
   const nextOptions = STATUS_FLOW.filter(s => s !== r.status);
   // When currently parked in one of the four status columns, offer an
@@ -1597,6 +1604,16 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   // "moved out of Staging/Rehab/Out of Service/Released" should be
   // just as reachable as moving into one of them in the first place.
   const canReturnToDivision = STATUS_FLOW.includes(r.status) && r.assignment;
+  // Same fallback-to-everything-if-unconfigured filtering ResourceForm
+  // uses at check-in — kept in sync with it rather than reimplemented
+  // slightly differently. The resource's OWN current assignment is
+  // always included even if it falls outside the current type's
+  // filtered subset (e.g. the incident type changed after this unit
+  // checked in) — otherwise editing the card could silently make its
+  // existing, valid assignment vanish from the list entirely.
+  const typeFilter = assignmentsByType && incidentType ? assignmentsByType[incidentType] : null;
+  const baseAssignmentOptions = (typeFilter && typeFilter.length > 0) ? typeFilter : (assignmentPresets || []);
+  const cardAssignmentOptions = (r.assignment && !baseAssignmentOptions.includes(r.assignment)) ? [r.assignment, ...baseAssignmentOptions] : baseAssignmentOptions;
   // Once released, the timer stops accruing — freeze it at the moment
   // of release instead of continuing to tick against real time.
   const cardNow = r.status === "Released" ? new Date(r.statusSince).getTime() : now;
@@ -1633,7 +1650,10 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
       </div>
       {editing ? (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-          <TextInput placeholder="Assignment / Division" defaultValue={r.assignment} onBlur={e => onUpdate(r.id, { assignment: e.target.value })} />
+          <Select value={r.assignment} onChange={e => onUpdate(r.id, { assignment: e.target.value })}>
+            <option value="">Select assignment...</option>
+            {cardAssignmentOptions.map(a => <option key={a} value={a}>{a}</option>)}
+          </Select>
           <TextInput placeholder="Task" defaultValue={r.task} onBlur={e => onUpdate(r.id, { task: e.target.value })} />
           <TextArea placeholder="Notes" defaultValue={r.notes} onBlur={e => onUpdate(r.id, { notes: e.target.value })} style={{ minHeight: 44 }} />
           <Btn kind="subtle" onClick={() => setEditing(false)}>Done</Btn>
@@ -1652,7 +1672,7 @@ function ResourceCard({ r, onMove, onUpdate, onRemove, now, dragProps, isDraggin
   );
 }
 
-function TabResources({ resources, setResources, now, incident, setIncident, parIntervalMinutes, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
+function TabResources({ resources, setResources, now, incident, setIncident, parIntervalMinutes, departments, onAddDepartment, onAddUnitUnderDepartment, onRenameDepartment, onDeleteDepartment, onReorderDepartment, onRenameUnit, onDeleteUnit, onMoveUnit, onReorderUnit, assignmentPresets, assignmentsByType, onSaveAssignmentPreset, onRenameAssignment, onDeleteAssignment, onReorderAssignment, resourceKindPresets, onAddResourceKind, onRenameResourceKind, onDeleteResourceKind, onReorderResourceKind, onOpenManageResources, taskPresets, onSaveTaskPreset, resourceColumnOrder, setResourceColumnOrder, onTriggerMayday, onStartPar }) {
   // Drag state lives here (not per-card) since the floating preview and
   // column highlight need to render across the whole board. Built on
   // the Pointer Events API + elementFromPoint rather than native HTML5
@@ -1739,7 +1759,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
         <Panel title="Check In Resource" icon={Truck} style={{ flex: "2 1 420px" }} right={
           <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
         }>
-          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} />
+          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} incidentType={incident.type} assignmentsByType={assignmentsByType} />
         </Panel>
         <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
           {realObjectives.length === 0 ? (
@@ -1837,6 +1857,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
               {items.length === 0 && <div style={{ fontSize: 12, color: COLORS.faint, padding: "10px 2px" }}>No resources</div>}
               {items.map(r => (
                 <ResourceCard key={r.id} r={r} onMove={moveResourceToColumn} onUpdate={updateResource} onRemove={removeResource} now={now}
+                  assignmentPresets={assignmentPresets} assignmentsByType={assignmentsByType} incidentType={incident.type}
                   isDragging={drag && drag.id === r.id}
                   dragProps={{
                     onPointerDown: (e) => handlePointerDown(r, e),
@@ -5909,6 +5930,53 @@ function ManageObjectivesModal({ onClose, onBack, incidentTypes, objectivesByTyp
   );
 }
 
+// Filters the assignment/division dropdown at check-in (ResourceForm)
+// down to a per-incident-type subset — a checkbox picker over the
+// existing shared assignments list, not a freeform list of its own,
+// since a division like "Division A" is typically reusable across
+// several incident types rather than being specific to one.
+function ManageAssignmentsByTypeModal({ onClose, onBack, incidentTypes, assignmentPresets, assignmentsByType, onToggle }) {
+  const [selectedCategory, setSelectedCategory] = useState(incidentTypes[0] || "");
+  const selected = assignmentsByType[selectedCategory] || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
+      <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 400, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onBack && <button onClick={onBack} title="Back to Admin" style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer", display: "flex", alignItems: "center" }}><ChevronLeft size={18} /></button>}
+            <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Assignments by Incident Type</span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          Pick which of the existing assignments/divisions show up at check-in for each incident type. Leaving none checked for a type shows every assignment for that type instead — this only narrows the list once you've actually picked some.
+        </div>
+        {incidentTypes.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint }}>No incident types set up yet — add some under Manage Incident Types first.</div>
+        ) : assignmentPresets.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.faint }}>No assignments set up yet — add some under Manage Resources first.</div>
+        ) : (
+          <>
+            <Field label="Incident Type">
+              <Select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+                {incidentTypes.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </Field>
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              {assignmentPresets.map(a => (
+                <label key={a} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, cursor: "pointer" }}>
+                  <input type="checkbox" checked={selected.includes(a)} onChange={() => onToggle(selectedCategory, a)} style={{ width: 15, height: 15 }} />
+                  {a}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRename, onDelete, onReorder }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
@@ -5938,7 +6006,7 @@ function ManageIncidentTypesModal({ onClose, onBack, incidentTypes, onAdd, onRen
 // ever renders. Previously, changing the admin password specifically
 // only lived inside the archive browsing flow, several steps removed
 // from where someone would naturally look for it.
-function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives, onManageParSettings }) {
+function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncidentTypes, onManageResources, onManageObjectives, onManageAssignmentsByType, onManageParSettings }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, padding: 20 }}>
@@ -5952,6 +6020,7 @@ function AdminModal({ onClose, onChangePin, onChangeAdminPassword, onManageIncid
           <Btn kind="ghost" icon={ClipboardList} onClick={onManageIncidentTypes} style={{ width: "100%", justifyContent: "center" }}>Manage Incident Types</Btn>
           <Btn kind="ghost" icon={Settings} onClick={onManageResources} style={{ width: "100%", justifyContent: "center" }}>Manage Resources</Btn>
           <Btn kind="ghost" icon={Star} onClick={onManageObjectives} style={{ width: "100%", justifyContent: "center" }}>Manage Objectives</Btn>
+          <Btn kind="ghost" icon={Layers} onClick={onManageAssignmentsByType} style={{ width: "100%", justifyContent: "center" }}>Assignments by Incident Type</Btn>
           <Btn kind="ghost" icon={AlertTriangle} onClick={onManageParSettings} style={{ width: "100%", justifyContent: "center" }}>PAR / Mayday Settings</Btn>
         </div>
       </div>
@@ -6477,11 +6546,12 @@ function AppInner({ onLock, theme, toggleTheme }) {
   // when there's actually an Admin menu to go back to.
   const [manageResourcesFromAdmin, setManageResourcesFromAdmin] = useState(false);
   const [showManageObjectives, setShowManageObjectives] = useState(false);
+  const [showManageAssignmentsByType, setShowManageAssignmentsByType] = useState(false);
   const [showParSettings, setShowParSettings] = useState(false);
   const [showManageResourcesAuth, setShowManageResourcesAuth] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeArchivePassword, setShowChangeArchivePassword] = useState(false);
-  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], tasks: [], parIntervalMinutes: 15 });
+  const [presets, setPresets] = useState({ departments: [], objectives: [], assignments: [], resourceKinds: [], incidentTypes: [], objectivesByType: {}, assignmentsByType: {}, tasks: [], parIntervalMinutes: 15 });
   const [formsUsed, setFormsUsed] = useState({});
   const [attachments, setAttachments] = useState([]);
   const toggleFormUsed = (key) => setFormsUsed(f => ({ ...f, [key]: !f[key] }));
@@ -6582,9 +6652,18 @@ function AppInner({ onLock, theme, toggleTheme }) {
       // saved keeps showing up as a suggestion, just alongside the
       // new per-type categories instead of being the only list.
       const objectivesByType = p.objectivesByType || (p.objectives && p.objectives.length > 0 ? { General: p.objectives } : {});
+      // Which of the existing (already-shared) assignments/divisions
+      // are relevant for a given incident type — a membership map
+      // rather than a separate freeform list per type, since
+      // divisions are a shared, reusable pool (unlike objectives,
+      // which are inherently type-specific text). Empty/missing for a
+      // type means "not yet configured", not "nothing available" —
+      // see the fallback in ResourceForm, which shows every
+      // assignment for any type that hasn't had a filter set up.
+      const assignmentsByType = p.assignmentsByType || {};
       const tasks = p.tasks || [];
       const parIntervalMinutes = p.parIntervalMinutes || 15;
-      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, tasks, parIntervalMinutes });
+      setPresets({ departments, objectives: p.objectives || [], assignments: p.assignments || [], resourceKinds, incidentTypes, objectivesByType, assignmentsByType, tasks, parIntervalMinutes });
       setReady(true);
       setShowLib(true); // land on the incident library instead of auto-opening one
     })();
@@ -6730,12 +6809,28 @@ function AppInner({ onLock, theme, toggleTheme }) {
     savePresets(next);
   };
   const renameAssignmentPreset = (oldName, newName) => {
-    const next = { ...presets, assignments: presets.assignments.map(a => a === oldName ? newName : a) };
+    // Keeps assignmentsByType in sync — a rename would otherwise
+    // silently break filtering for any incident type that had the
+    // old name checked, since it would no longer match anything in
+    // the (now-renamed) master assignments list.
+    const renamedByType = {};
+    Object.keys(presets.assignmentsByType).forEach(type => {
+      renamedByType[type] = presets.assignmentsByType[type].map(a => a === oldName ? newName : a);
+    });
+    const next = { ...presets, assignments: presets.assignments.map(a => a === oldName ? newName : a), assignmentsByType: renamedByType };
     setPresets(next);
     savePresets(next);
   };
   const deleteAssignmentPreset = (name) => {
-    const next = { ...presets, assignments: presets.assignments.filter(a => a !== name) };
+    // Same reasoning as the rename above — removes any dangling
+    // reference to the deleted assignment from every type's filter
+    // list, rather than leaving a name checked that no longer exists
+    // anywhere in the master list.
+    const clearedByType = {};
+    Object.keys(presets.assignmentsByType).forEach(type => {
+      clearedByType[type] = presets.assignmentsByType[type].filter(a => a !== name);
+    });
+    const next = { ...presets, assignments: presets.assignments.filter(a => a !== name), assignmentsByType: clearedByType };
     setPresets(next);
     savePresets(next);
   };
@@ -6931,6 +7026,18 @@ function AppInner({ onLock, theme, toggleTheme }) {
   };
   const reorderObjectivesForType = (type, newList) => {
     const next = { ...presets, objectivesByType: { ...presets.objectivesByType, [type]: newList } };
+    setPresets(next);
+    savePresets(next);
+  };
+  // Toggles ONE existing assignment's membership in a given incident
+  // type's filtered list — not a freeform add/rename/delete set like
+  // objectives, since this is picking a subset of the already-shared
+  // assignments list (managed separately under Manage Resources),
+  // not creating type-specific entries of its own.
+  const toggleAssignmentForType = (type, assignmentName) => {
+    const current = presets.assignmentsByType[type] || [];
+    const nextList = current.includes(assignmentName) ? current.filter(a => a !== assignmentName) : [...current, assignmentName];
+    const next = { ...presets, assignmentsByType: { ...presets.assignmentsByType, [type]: nextList } };
     setPresets(next);
     savePresets(next);
   };
@@ -7271,7 +7378,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 departments={presets.departments} onAddDepartment={saveDepartment} onAddUnitUnderDepartment={saveUnitUnderDepartment}
                 onRenameDepartment={renameDepartment} onDeleteDepartment={deleteDepartment} onReorderDepartment={reorderDepartments}
                 onRenameUnit={renameUnit} onDeleteUnit={deleteUnit} onMoveUnit={moveUnit} onReorderUnit={reorderUnits}
-                assignmentPresets={presets.assignments} onSaveAssignmentPreset={saveAssignmentPreset}
+                assignmentPresets={presets.assignments} assignmentsByType={presets.assignmentsByType} onSaveAssignmentPreset={saveAssignmentPreset}
                 onRenameAssignment={renameAssignmentPreset} onDeleteAssignment={deleteAssignmentPreset} onReorderAssignment={reorderAssignmentPresets}
                 resourceKindPresets={presets.resourceKinds} onAddResourceKind={addResourceKind} onRenameResourceKind={renameResourceKind}
                 onDeleteResourceKind={deleteResourceKind} onReorderResourceKind={reorderResourceKinds}
@@ -7387,6 +7494,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onManageIncidentTypes={() => { setShowAdminMenu(false); setShowManageIncidentTypes(true); }}
           onManageResources={() => { setShowAdminMenu(false); setManageResourcesFromAdmin(true); setShowManageResources(true); }}
           onManageObjectives={() => { setShowAdminMenu(false); setShowManageObjectives(true); }}
+          onManageAssignmentsByType={() => { setShowAdminMenu(false); setShowManageAssignmentsByType(true); }}
           onManageParSettings={() => { setShowAdminMenu(false); setShowParSettings(true); }}
         />
       )}
@@ -7420,6 +7528,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
           onRename={renameObjectiveForType}
           onDelete={deleteObjectiveForType}
           onReorder={reorderObjectivesForType}
+        />
+      )}
+      {showManageAssignmentsByType && (
+        <ManageAssignmentsByTypeModal
+          onClose={() => setShowManageAssignmentsByType(false)}
+          onBack={() => { setShowManageAssignmentsByType(false); setShowAdminMenu(true); }}
+          incidentTypes={presets.incidentTypes}
+          assignmentPresets={presets.assignments}
+          assignmentsByType={presets.assignmentsByType}
+          onToggle={toggleAssignmentForType}
         />
       )}
       {showManageResourcesAuth && (
