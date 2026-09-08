@@ -585,11 +585,11 @@ function shortDivisionLabel(name) {
 // fixed-size square (rather than a wider pill sized to the full name)
 // keeps the map itself uncluttered — the full name only appears in
 // the popup on click, along with the current unit list.
-function makeDivisionMarkerIcon(divisionName) {
+function makeDivisionMarkerIcon(divisionName, color) {
   const short = shortDivisionLabel(divisionName);
   return L.divIcon({
     className: "cb-map-division-marker",
-    html: `<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:var(--cb-panel);color:var(--cb-text);border:2px solid var(--cb-amber);border-radius:4px;font:700 10px 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.02em;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer;">${short}</div>`,
+    html: `<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:var(--cb-panel);color:var(--cb-text);border:2px solid ${color};border-radius:4px;font:700 10px 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.02em;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer;">${short}</div>`,
     iconSize: [26, 26],
     iconAnchor: [13, 13],
   });
@@ -1959,13 +1959,13 @@ function bindOrUpdatePerimeterTooltip(layer, acres) {
   else layer.bindTooltip(label, { permanent: true, direction: "center", className: "cb-perimeter-tooltip" });
 }
 
-function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, onDivisionMarkerClick) {
+function loadGeoJsonIntoGroup(featureGroup, geojson, makeLayerMovable, onDivisionMarkerClick, getDivisionColor) {
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
       const props = feature.properties || {};
       if ("radius" in props) return L.circle(latlng, { radius: props.radius });
       if ("textLabel" in props) return L.marker(latlng, { icon: makeTextIcon(props.textLabel) });
-      if (props.isDivisionMarker) return L.marker(latlng, { icon: makeDivisionMarkerIcon(props.divisionName) });
+      if (props.isDivisionMarker) return L.marker(latlng, { icon: makeDivisionMarkerIcon(props.divisionName, getDivisionColor(props.divisionName)) });
       return L.marker(latlng);
     },
   }).eachLayer(layer => {
@@ -2025,6 +2025,8 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
   const editingActiveRef = useRef(false); // true while leaflet-draw's own edit/delete mode is active
   const latestMapDataRef = useRef(mapData); // mirrors the mapData prop for use inside the poll's setInterval closure
   const latestResourcesRef = useRef(resources); // same pattern, for looking up a division marker's current units at click time without needing to react to every resources change
+  const latestAssignmentPresetsRef = useRef(assignmentPresets); // same pattern, used together with the two refs above/below so a marker's border color always reflects the CURRENT column order, not whatever existed when the map-sync effect's closures were first created
+  const latestResourceColumnOrderRef = useRef(resourceColumnOrder);
   const lastSyncedMapDataRef = useRef(null); // JSON string of whatever drawnItems currently reflects
   const textPromptOpenRef = useRef(false); // mirrors textPrompt state, for the same reason as latestMapDataRef
   const perimeterPointsRef = useRef([]); // accumulated GPS fixes while tracing a perimeter
@@ -2044,6 +2046,8 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
 
   useEffect(() => { latestMapDataRef.current = mapData; }, [mapData]);
   useEffect(() => { latestResourcesRef.current = resources; }, [resources]);
+  useEffect(() => { latestAssignmentPresetsRef.current = assignmentPresets; }, [assignmentPresets]);
+  useEffect(() => { latestResourceColumnOrderRef.current = resourceColumnOrder; }, [resourceColumnOrder]);
   useEffect(() => { textPromptOpenRef.current = !!textPrompt; }, [textPrompt]);
 
   const startTracingPerimeter = () => {
@@ -2170,6 +2174,19 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
     layer.bindPopup(html).openPopup();
   };
 
+  // Same color a division's palette card uses (assignmentColumnColor
+  // cycles by position in the CURRENT list of active columns, the
+  // same way the Resource Board itself colors things) — reads from
+  // refs rather than closing directly over the resources/
+  // assignmentPresets/resourceColumnOrder props so this always
+  // reflects live data even when called from a closure that was
+  // itself only created once, like the sync poll's setInterval
+  // callback inside the mount-once map-setup effect below.
+  const getDivisionColor = (divisionName) => {
+    const columns = deriveAssignmentColumns(latestResourcesRef.current || [], latestAssignmentPresetsRef.current, latestResourceColumnOrderRef.current);
+    return assignmentColumnColor(divisionName, columns);
+  };
+
   // Handles dragging a division card from the palette (rendered
   // below) onto the map. Uses window-level pointer listeners rather
   // than native HTML5 drag-and-drop — the same choice already made
@@ -2190,7 +2207,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       const overMap = rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
       if (overMap && mapRef.current && drawnItemsRef.current) {
         const latlng = mapRef.current.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
-        const marker = L.marker(latlng, { icon: makeDivisionMarkerIcon(divisionName) });
+        const marker = L.marker(latlng, { icon: makeDivisionMarkerIcon(divisionName, getDivisionColor(divisionName)) });
         marker.__isDivisionMarker = true;
         marker.__divisionName = divisionName;
         marker.on("click", () => onDivisionMarkerClick(divisionName, marker));
@@ -2286,7 +2303,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
     persistRef.current = persist;
 
     if (mapData && mapData.features && mapData.features.length > 0) {
-      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable, onDivisionMarkerClick);
+      loadGeoJsonIntoGroup(drawnItems, mapData, makeLayerMovable, onDivisionMarkerClick, getDivisionColor);
     }
     lastSyncedMapDataRef.current = JSON.stringify(mapData);
 
@@ -2353,7 +2370,7 @@ function TabMapping({ mapData, setMapData, resources, assignmentPresets, resourc
       if (incomingJson === lastSyncedMapDataRef.current) return;
       drawnItems.clearLayers();
       if (latestMapDataRef.current && latestMapDataRef.current.features && latestMapDataRef.current.features.length > 0) {
-        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable, onDivisionMarkerClick);
+        loadGeoJsonIntoGroup(drawnItems, latestMapDataRef.current, makeLayerMovable, onDivisionMarkerClick, getDivisionColor);
       }
       lastSyncedMapDataRef.current = incomingJson;
     }, 5000);
@@ -5299,7 +5316,24 @@ function computeGeoJsonBounds(mapData) {
 // projection and radius-to-pixel conversion the caller supplies, so
 // the same drawing logic works whether the underlying scale comes
 // from a simple linear projection or a real Web Mercator zoom level.
-function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
+// Dark-theme hex equivalents of the live app's CSS-variable colors
+// (theme.js), used only for canvas drawing in the PDF export — a
+// canvas strokeStyle/fillStyle reliably resolving a var(--x)
+// reference depends on the canvas being attached to a DOM tree where
+// that variable is actually defined, which isn't guaranteed for an
+// offscreen PDF-generation canvas, so concrete hex values are used
+// here instead. Picking one fixed theme (dark, matching this file's
+// other existing PDF map-drawing colors) rather than trying to make a
+// static, already-generated PDF "switch themes."
+const PDF_STATUS_COLOR = { Active: "#3B6FA6", Staging: "#D9A02B", Rehab: "#2E8B72", "Out of Service": "#565F68", Released: "#5A6169" };
+const PDF_ASSIGNMENT_COLOR_PALETTE = ["#D9A02B", "#2E8B72", "#3B6FA6", "#8B5CF6", "#E85D28", "#C4341F"];
+function pdfAssignmentColor(assignment, columns) {
+  if (PDF_STATUS_COLOR[assignment]) return PDF_STATUS_COLOR[assignment];
+  const idx = columns.indexOf(assignment);
+  return idx === -1 ? "#565F68" : PDF_ASSIGNMENT_COLOR_PALETTE[idx % PDF_ASSIGNMENT_COLOR_PALETTE.length];
+}
+
+function drawMapFeatures(ctx, mapData, project, radiusToPixels, getDivisionColor) {
   mapData.features.forEach(f => {
     const props = f.properties || {};
     const g = f.geometry;
@@ -5344,14 +5378,15 @@ function drawMapFeatures(ctx, mapData, project, radiusToPixels) {
         // Small fixed-size square with a short label, matching the
         // compact on-map marker style (see makeDivisionMarkerIcon) —
         // keeps the PDF export's map snapshot visually consistent
-        // with what's actually shown live on the Mapping tab. Manual
-        // arcTo corners (not ctx.roundRect) to match this file's
-        // existing rounded-box drawing elsewhere and avoid relying on
-        // a newer canvas API on older devices.
+        // with what's actually shown live on the Mapping tab,
+        // including its border color. Manual arcTo corners (not
+        // ctx.roundRect) to match this file's existing rounded-box
+        // drawing elsewhere and avoid relying on a newer canvas API
+        // on older devices.
         const label = shortDivisionLabel(props.divisionName || "");
         const half = 13, r = 4, bx = p.x - half, by = p.y - half, boxW = half * 2, boxH = half * 2;
         ctx.fillStyle = "#1B1F23";
-        ctx.strokeStyle = "#D9A02B";
+        ctx.strokeStyle = getDivisionColor(props.divisionName);
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(bx + r, by);
@@ -5422,7 +5457,7 @@ function drawNorthArrow(ctx, canvasW) {
 // redrawn to scale on white. Always succeeds (given at least one
 // feature exists), which is why the tile-based attempt below falls
 // back to this on any failure rather than producing nothing.
-function renderMapSnapshotVectorOnly(mapData, bounds) {
+function renderMapSnapshotVectorOnly(mapData, bounds, getDivisionColor) {
   const PADDING = 40, CANVAS_W = 1000, CANVAS_H = 700;
   const centerLat = (bounds.minLat + bounds.maxLat) / 2;
   // Longitude degrees represent fewer real-world meters than latitude
@@ -5447,7 +5482,7 @@ function renderMapSnapshotVectorOnly(mapData, bounds) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  drawMapFeatures(ctx, mapData, project, (meters) => (meters / 111320) * scale);
+  drawMapFeatures(ctx, mapData, project, (meters) => (meters / 111320) * scale, getDivisionColor);
   drawNorthArrow(ctx, CANVAS_W);
   return canvas.toDataURL("image/png");
 }
@@ -5475,7 +5510,7 @@ function loadTileImage(url) {
 // below still returns null rather than throwing, though, and the
 // caller (renderMapSnapshotDataUri) falls back to the tile-free
 // diagram instead of producing nothing, in case that ever changes.
-async function renderMapSnapshotWithTiles(mapData, bounds) {
+async function renderMapSnapshotWithTiles(mapData, bounds, getDivisionColor) {
   const TILE_SIZE = 256, CANVAS_W = 1000, CANVAS_H = 700, PADDING = 20;
 
   let zoom = 18;
@@ -5526,7 +5561,7 @@ async function renderMapSnapshotWithTiles(mapData, bounds) {
   };
   // Standard Web Mercator meters-per-pixel formula at this zoom/latitude.
   const radiusToPixels = (meters, lat) => meters / (156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom));
-  drawMapFeatures(ctx, mapData, project, radiusToPixels);
+  drawMapFeatures(ctx, mapData, project, radiusToPixels, getDivisionColor);
   drawNorthArrow(ctx, CANVAS_W);
 
   try {
@@ -5539,16 +5574,22 @@ async function renderMapSnapshotWithTiles(mapData, bounds) {
   }
 }
 
-async function renderMapSnapshotDataUri(mapData) {
+async function renderMapSnapshotDataUri(mapData, resources, assignmentPresets, resourceColumnOrder) {
   if (!mapData || !mapData.features || mapData.features.length === 0) return null;
   const bounds = computeGeoJsonBounds(mapData);
+  // Same live-computed, position-cycling color a division's palette
+  // card and its on-map marker both already use (assignmentColumnColor)
+  // — just resolved to concrete hex here (pdfAssignmentColor) rather
+  // than a CSS var(), for the reasons explained above PDF_STATUS_COLOR.
+  const columns = deriveAssignmentColumns(resources || [], assignmentPresets, resourceColumnOrder);
+  const getDivisionColor = (name) => pdfAssignmentColor(name, columns);
   try {
-    const withTiles = await renderMapSnapshotWithTiles(mapData, bounds);
+    const withTiles = await renderMapSnapshotWithTiles(mapData, bounds, getDivisionColor);
     if (withTiles) return withTiles;
   } catch {
     // fall through to the reliable fallback below
   }
-  return renderMapSnapshotVectorOnly(mapData, bounds);
+  return renderMapSnapshotVectorOnly(mapData, bounds, getDivisionColor);
 }
 
 function loadLogoRGB(dataUri, maxDim = 130) {
@@ -5650,7 +5691,7 @@ async function downloadPacketPdf(data) {
   // under "Incident Perimeter" — see the comment on
   // renderMapSnapshotDataUri for why this redraws just the
   // annotations rather than exporting the live map with its tiles.
-  const mapSnapshotDataUri = await renderMapSnapshotDataUri(parseMapData(data.mapData));
+  const mapSnapshotDataUri = await renderMapSnapshotDataUri(parseMapData(data.mapData), data.resources, data.assignmentPresets, data.resourceColumnOrder);
   const mapSnapshotImage = mapSnapshotDataUri ? await loadLogoRGB(mapSnapshotDataUri, 1400) : null;
   for (const a of imageAttachments) {
     const decoded = await loadLogoRGB(`data:${a.type};base64,${a.dataBase64}`, 1000);
@@ -7087,7 +7128,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
     const blob = await loadIncidentBlobFresh(id);
     if (blob) {
       const atts = await loadAttachments(id);
-      await downloadPacketPdf({ ...blob, attachments: atts });
+      await downloadPacketPdf({ ...blob, attachments: atts, assignmentPresets: presets.assignments });
     }
   };
 
@@ -7149,7 +7190,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 </span>
               )}
               <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
+              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments, assignmentPresets: presets.assignments, resourceColumnOrder })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
               <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
               <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
               <Btn kind="ghost" icon={Settings} onClick={() => setShowAdminAuth(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Admin</Btn>
