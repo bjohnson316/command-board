@@ -198,8 +198,40 @@ function incidentTypeColor(type, typeList) {
 const RESOURCE_KINDS = [
   "Engine", "Ladder/Truck", "Tender/Tanker", "Brush Truck", "Rescue",
   "Ambulance/Medic", "Hazmat Unit", "Command Vehicle", "Air Unit",
-  "Dozer/Heavy Equip", "Hand Crew", "Law Enforcement", "Other",
+  "Dozer/Heavy Equip", "Hand Crew", "Law Enforcement", "Squad", "Fire Marshall", "Other",
 ];
+// Auto-detects a unit's resource type from its own name/designation
+// letters, per department radio-designation convention, so checking
+// in a preset unit needs one fewer manual selection — e.g. "C580"
+// auto-fills Command Vehicle, "E581" auto-fills Engine. Two-letter
+// codes are checked before any single-letter one they'd otherwise be
+// mistaken for the first letter of (TK vs T, HC vs H, LE vs L, FM has
+// no single-letter collision but is kept alongside the others for
+// clarity) — order matters here, longest-specific-match first.
+const UNIT_TYPE_PREFIX_MAP = [
+  ["FM", "Fire Marshall"],
+  ["TK", "Ladder/Truck"],
+  ["HC", "Hand Crew"],
+  ["LE", "Law Enforcement"],
+  ["E", "Engine"],
+  ["C", "Command Vehicle"],
+  ["L", "Ladder/Truck"],
+  ["T", "Tender/Tanker"],
+  ["B", "Brush Truck"],
+  ["M", "Ambulance/Medic"],
+  ["S", "Squad"],
+  ["R", "Rescue"],
+  ["H", "Hazmat Unit"],
+  ["A", "Air Unit"],
+  ["D", "Dozer/Heavy Equip"],
+];
+function detectResourceKindFromLabel(label) {
+  const upper = String(label || "").trim().toUpperCase();
+  for (const [prefix, kind] of UNIT_TYPE_PREFIX_MAP) {
+    if (upper.startsWith(prefix)) return kind;
+  }
+  return null;
+}
 const CG_POSITIONS = [
   "Incident Commander", "Deputy IC", "Safety Officer",
   "Public Information Officer", "Liaison Officer",
@@ -1459,7 +1491,7 @@ function ManageResourcesModal({
   );
 }
 
-function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType, tasksByType }) {
+function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, onAddResourceKind, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType, tasksByType }) {
   const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "", task: "" });
   const [deptId, setDeptId] = useState("");
   const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
@@ -1492,6 +1524,16 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
   };
 
   const startAdding = (field) => { setAddingField(field); setNewValue(""); };
+  // Runs the auto-detection and, when it finds a match, ensures that
+  // kind actually exists as a selectable preset (onAddResourceKind is
+  // a no-op if it already does) — covers a deployment whose saved
+  // resourceKinds list predates a designation like "Squad" or "Fire
+  // Marshall" being added.
+  const applyDetectedKind = (label) => {
+    const detected = detectResourceKindFromLabel(label);
+    if (detected) onAddResourceKind(detected);
+    return detected;
+  };
   const confirmAdd = () => {
     const name = newValue.trim();
     if (!name) return;
@@ -1501,7 +1543,8 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
       setF(prev => ({ ...prev, label: "" }));
     } else if (addingField === "unit") {
       onAddUnitUnderDepartment(deptId, name);
-      setF(prev => ({ ...prev, label: name }));
+      const detected = applyDetectedKind(name);
+      setF(prev => ({ ...prev, label: name, kind: detected || prev.kind }));
     } else if (addingField === "task") {
       onSaveTaskPreset(name);
       setF(prev => ({ ...prev, task: name }));
@@ -1546,7 +1589,10 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
         ) : (
           <Select value={f.label} disabled={!selectedDept} onChange={e => {
             if (e.target.value === "__add_new__") startAdding("unit");
-            else setF({ ...f, label: e.target.value });
+            else {
+              const detected = applyDetectedKind(e.target.value);
+              setF({ ...f, label: e.target.value, kind: detected || f.kind });
+            }
           }} style={{ width: 200 }} title={!selectedDept ? "Select a department first" : undefined}>
             <option value="">{selectedDept ? "Select a unit..." : "Select department first..."}</option>
             {selectedDept && selectedDept.units.map(u => <option key={u} value={u}>{u}</option>)}
@@ -1775,7 +1821,7 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
         <Panel title="Check In Resource" icon={Truck} style={{ flex: "2 1 420px" }} right={
           <Btn kind="subtle" icon={Settings} onClick={onOpenManageResources} style={{ padding: "6px 10px", fontSize: 12 }}>Manage Resources</Btn>
         }>
-          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} incidentType={incident.type} assignmentsByType={assignmentsByType} tasksByType={tasksByType} />
+          <ResourceForm onAdd={addResource} departments={departments} onAddDepartment={onAddDepartment} onAddUnitUnderDepartment={onAddUnitUnderDepartment} assignmentPresets={assignmentPresets} onSaveAssignmentPreset={onSaveAssignmentPreset} resourceKindPresets={resourceKindPresets} onAddResourceKind={onAddResourceKind} taskPresets={taskPresets} onSaveTaskPreset={onSaveTaskPreset} incidentType={incident.type} assignmentsByType={assignmentsByType} tasksByType={tasksByType} />
         </Panel>
         <Panel title="Objectives" icon={CheckCircle2} style={{ flex: "1 1 240px", maxWidth: 340 }}>
           {realObjectives.length === 0 ? (
