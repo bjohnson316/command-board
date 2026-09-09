@@ -240,6 +240,18 @@ const SECTION_CHIEFS = [
   "Operations Section Chief", "Planning Section Chief",
   "Logistics Section Chief", "Finance/Admin Section Chief",
 ];
+// Excludes an assignment/division named "Incident Command" (or a
+// close variant) from being auto-synced onto the Org Chart as if it
+// were a regular geographic/functional division under Operations —
+// that name means something specific and reserved (the org.ic field
+// at the very top of the chart), not a division to nest underneath a
+// Section Chief. Someone naming a Resource Board assignment exactly
+// that is describing the IC's own position, not creating a new
+// division.
+function isIncidentCommandName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  return n === "incident command" || n === "incident commander" || n === "ic";
+}
 
 /* ============================================================
    ORG CHART DATA MODEL
@@ -3311,7 +3323,33 @@ function TabWeather() {
   );
 }
 
-function TabOrg({ org, setOrg }) {
+function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder }) {
+  // Safety Officer, PIO, Liaison Officer, and the three non-Operations
+  // Section Chiefs only render if a matching assignment/division
+  // actually exists on the Resource Board right now — otherwise
+  // they're just empty boilerplate boxes for roles nobody's
+  // necessarily staffing on this particular incident. This is
+  // visibility-only: the underlying data is never touched or
+  // deleted, so a box that's hidden today reappears (with whatever it
+  // already had filled in) the moment a matching assignment shows up
+  // again. Operations Section Chief and the Incident Commander/Deputy
+  // IC boxes are never gated — Operations is where every auto-synced
+  // division lives regardless of its own name, and IC/Deputy IC are
+  // always-relevant top-level roles the user didn't ask to gate.
+  const activeAssignments = deriveAssignmentColumns(resources || [], assignmentPresets, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+  const hasMatchingAssignment = (positionTitle) => {
+    const t = String(positionTitle || "").trim().toLowerCase();
+    if (!t) return false;
+    return activeAssignments.some(a => {
+      const an = a.trim().toLowerCase();
+      return an === t || an.includes(t) || t.includes(an);
+    });
+  };
+  const GATED_TITLES = ["Safety Officer", "Public Information Officer", "Liaison Officer", "Planning Section Chief", "Logistics Section Chief", "Finance/Admin Section Chief"];
+  const isGated = (title) => GATED_TITLES.some(g => g.toLowerCase() === String(title || "").trim().toLowerCase());
+  const visibleCommandStaff = org.commandStaff.filter(cs => !isGated(cs.title) || hasMatchingAssignment(cs.title));
+  const visibleSections = org.sections.filter(s => !isGated(s.title) || hasMatchingAssignment(s.title));
+
   const setIc = (v) => setOrg({ ...org, ic: v });
   const setDeputyIc = (v) => setOrg({ ...org, deputyIc: v });
   const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "" }] });
@@ -3347,7 +3385,7 @@ function TabOrg({ org, setOrg }) {
               {/* Command Staff cluster */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                  {org.commandStaff.map(cs => (
+                  {visibleCommandStaff.map(cs => (
                     <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable
                       onTitleChange={v => updateCommandStaff(cs.id, { title: v })}
                       onNameChange={v => updateCommandStaff(cs.id, { name: v })}
@@ -3360,7 +3398,7 @@ function TabOrg({ org, setOrg }) {
               </div>
               {/* Section Chiefs, each independently expandable */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-                {org.sections.map(section => (
+                {visibleSections.map(section => (
                   <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
                 ))}
               </div>
@@ -7455,9 +7493,16 @@ function AppInner({ onLock, theme, toggleTheme }) {
     setOrg(prev => {
       const opsSection = prev.sections.find(s => s.title === "Operations Section Chief");
       if (!opsSection) return prev;
-      const activeDivisions = deriveAssignmentColumns(resources, presets.assignments, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
-      const nextDivisionNodes = [...(opsSection.children || [])];
-      let changed = false;
+      const activeDivisions = deriveAssignmentColumns(resources, presets.assignments, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col) && !isIncidentCommandName(col));
+      // Retroactively removes an "Incident Command"-named division
+      // node if one already got created under Operations before this
+      // exclusion existed — safe to do since it only ever touches a
+      // node that's still autoName !== false (i.e. nobody has
+      // actually edited it by hand); a manually-edited one, however
+      // it got its title, is left alone like anything else a human
+      // has touched.
+      let nextDivisionNodes = (opsSection.children || []).filter(c => !(isIncidentCommandName(c.title) && c.autoName !== false));
+      let changed = nextDivisionNodes.length !== (opsSection.children || []).length;
 
       activeDivisions.forEach(divisionName => {
         const unitsHere = resources.filter(r => columnFor(r) === divisionName);
@@ -7691,7 +7736,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "weather" && <TabWeather />}
-              {tab === "org" && <TabOrg org={org} setOrg={setOrg} />}
+              {tab === "org" && <TabOrg org={org} setOrg={setOrg} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
                 <TabICSForms
