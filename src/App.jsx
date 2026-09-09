@@ -2132,8 +2132,65 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
 // A single box in the org chart — title (usually fixed, but editable
 // for command-staff and expanded nodes so new positions can be named
 // anything) plus the name of whoever holds it.
-function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild, titleEditable, isRoot, titleOptions }) {
-  const [showTitlePicker, setShowTitlePicker] = useState(false);
+// Text input + a ▾ button that opens a modal listing every option in
+// full — shared by OrgBox's title field (assignments/divisions) and
+// name field (units) below, rather than duplicating the same modal
+// logic twice. Typing directly still always works; the button is
+// purely an additional way in, not a replacement for it.
+function PickerInput({ value, onChange, options, placeholder, inputStyle, modalTitle }) {
+  const [showPicker, setShowPicker] = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 3, width: "100%" }}>
+      <TextInput value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+      {options && options.length > 0 && (
+        <button onClick={() => setShowPicker(true)} title={`Pick from ${modalTitle}`}
+          style={{ background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.muted, cursor: "pointer", padding: "0 3px", flexShrink: 0, display: "flex", alignItems: "center" }}>
+          <ChevronDown size={11} />
+        </button>
+      )}
+      {showPicker && (
+        // Fixed-position modal (not an inline/relative dropdown) so
+        // the full option list is always immediately visible and
+        // can't get clipped by the org chart's own horizontal scroll
+        // container the way a positioned-relative-to-the-box dropdown
+        // could.
+        <div onClick={() => setShowPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, maxHeight: "70vh", overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13 }}>{modalTitle}</span>
+              <button onClick={() => setShowPicker(false)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {options.map(opt => (
+                <button key={opt} onClick={() => { onChange(opt); setShowPicker(false); }}
+                  style={{ background: "none", border: "none", textAlign: "left", padding: "7px 8px", borderRadius: 4, color: COLORS.text, fontSize: 13, cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.panel2}
+                  onMouseLeave={e => e.currentTarget.style.background = "none"}>
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// titleOptions/nameOptions are only ever passed for a manually-added
+// box (via "+ Add Below"/"+ Add Command Staff" — see manuallyAdded,
+// set at creation) — a box that mirrors the Resource Board (an
+// auto-synced division, or a per-unit sub-box) already has both
+// fields determined by the board itself, so a picker there would be
+// redundant at best and could let someone quietly disconnect it from
+// the sync without realizing that's what editing either field does.
+// The top field (title) is always what DIVISION/position this box
+// represents, so it picks from assignments/divisions; the field below
+// it (name) is always WHO/WHAT fills that position, so it picks from
+// units instead — a uniform rule regardless of how deep the box is
+// nested in the tree.
+function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild, titleEditable, isRoot, titleOptions, nameOptions }) {
   return (
     <div style={{
       background: isRoot ? COLORS.panel2 : COLORS.panel, border: `1.5px solid ${isRoot ? COLORS.amber : COLORS.line}`,
@@ -2145,50 +2202,15 @@ function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild
         </button>
       )}
       {titleEditable ? (
-        <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-          <TextInput value={title} onChange={e => onTitleChange(e.target.value)}
-            style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", color: COLORS.amber, flex: 1, minWidth: 0 }} />
-          {/* Opens a full modal listing every assignment/division
-              (titleOptions), rather than a browser datalist — a
-              datalist's "show the full list without typing first"
-              behavior is inconsistent across browsers and devices,
-              which was the actual problem being solved here. A modal
-              guarantees the whole list is visible immediately, and
-              (being fixed-position, same as every other modal in this
-              app) can't get clipped by this chart's own horizontal
-              scroll container the way an inline dropdown positioned
-              relative to the box itself could. */}
-          {titleOptions && titleOptions.length > 0 && (
-            <button onClick={() => setShowTitlePicker(true)} title="Pick from existing assignments/divisions"
-              style={{ background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.muted, cursor: "pointer", padding: "0 3px", flexShrink: 0, display: "flex", alignItems: "center" }}>
-              <ChevronDown size={11} />
-            </button>
-          )}
+        <div style={{ marginBottom: 5 }}>
+          <PickerInput value={title} onChange={onTitleChange} options={titleOptions} modalTitle="Pick a Division/Assignment"
+            inputStyle={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", color: COLORS.amber }} />
         </div>
       ) : (
         <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", color: COLORS.amber, marginBottom: 5, lineHeight: 1.3 }}>{title}</div>
       )}
-      <TextInput value={name} onChange={e => onNameChange(e.target.value)} placeholder="Name" style={{ fontSize: 12.5, textAlign: "center", padding: "5px 6px" }} />
-      {showTitlePicker && (
-        <div onClick={() => setShowTitlePicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, maxHeight: "70vh", overflowY: "auto", padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13 }}>Pick a Division/Assignment</span>
-              <button onClick={() => setShowTitlePicker(false)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {titleOptions.map(opt => (
-                <button key={opt} onClick={() => { onTitleChange(opt); setShowTitlePicker(false); }}
-                  style={{ background: "none", border: "none", textAlign: "left", padding: "7px 8px", borderRadius: 4, color: COLORS.text, fontSize: 13, cursor: "pointer" }}
-                  onMouseEnter={e => e.currentTarget.style.background = COLORS.panel2}
-                  onMouseLeave={e => e.currentTarget.style.background = "none"}>
-                  {opt}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <PickerInput value={name} onChange={onNameChange} options={nameOptions} placeholder="Name" modalTitle="Pick a Unit"
+        inputStyle={{ fontSize: 12.5, textAlign: "center", padding: "5px 6px" }} />
       {onAddChild && (
         <button onClick={onAddChild} title="Add sub-unit below this one" style={{ marginTop: 6, background: "none", border: `1px dashed ${COLORS.line}`, borderRadius: 4, color: COLORS.muted, cursor: "pointer", fontSize: 10, padding: "3px 7px", width: "100%" }}>
           + Add Below
@@ -2226,38 +2248,32 @@ function OrgConnectors({ children }) {
 // into Branches -> Divisions/Groups -> further sub-units arbitrarily
 // deep, since each level is rendered by the same component calling
 // itself on its own children.
-// isTopLevel marks a node rendered directly by TabOrg (a Section
-// Chief, or Incident Command's own children) as opposed to a node
-// reached only through this component's own recursion — used purely
-// to decide what pickerKind a NEWLY-added child gets: "division"
-// when adding beneath a top-level node (creating a new
-// division/group under a Section Chief or Incident Command), "unit"
-// when adding beneath anything else (a division, presumed to now be
-// getting a unit nested under it rather than another division).
-function OrgTree({ node, onUpdate, onDelete, onAddChild, titleOptions, unitOptions, isTopLevel }) {
+function OrgTree({ node, onUpdate, onDelete, onAddChild, titleOptions, unitOptions }) {
   // Only a manually-added box (via "+ Add Below"/"+ Add Command
   // Staff" — see manuallyAdded, set at creation in
   // addSectionChild/addIncidentCommandChild/addCommandStaff) ever
-  // gets a title picker at all. A box that mirrors something on the
-  // Resource Board (an auto-synced division, or a per-unit sub-box)
-  // already has its title determined by the board itself — offering
-  // a picker there would be redundant at best, and at worst let
-  // someone quietly disconnect it from the sync without realizing
-  // that's what editing the title does.
-  const pickerOptions = node.manuallyAdded ? (node.pickerKind === "unit" ? unitOptions : titleOptions) : undefined;
+  // gets a picker on either field at all. A box that mirrors
+  // something on the Resource Board (an auto-synced division, or a
+  // per-unit sub-box) already has both fields determined by the
+  // board itself — offering a picker there would be redundant at
+  // best, and at worst let someone quietly disconnect it from the
+  // sync without realizing that's what editing either field does.
+  const showPickers = !!node.manuallyAdded;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <OrgBox
-        title={node.title} name={node.name} titleEditable titleOptions={pickerOptions}
+        title={node.title} name={node.name} titleEditable
+        titleOptions={showPickers ? titleOptions : undefined}
+        nameOptions={showPickers ? unitOptions : undefined}
         onTitleChange={v => onUpdate(node.id, { title: v, autoName: false })}
         onNameChange={v => onUpdate(node.id, { name: v, autoName: false })}
         onDelete={() => onDelete(node.id)}
-        onAddChild={() => onAddChild(node.id, isTopLevel ? "division" : "unit")}
+        onAddChild={() => onAddChild(node.id)}
       />
       {node.children && node.children.length > 0 && (
         <OrgConnectors>
           {node.children.map(child => (
-            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} titleOptions={titleOptions} unitOptions={unitOptions} isTopLevel={false} />
+            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} titleOptions={titleOptions} unitOptions={unitOptions} />
           ))}
         </OrgConnectors>
       )}
@@ -3546,7 +3562,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
   const isGated = (title) => GATED_TITLES.some(g => g.toLowerCase() === String(title || "").trim().toLowerCase());
   const visibleCommandStaff = org.commandStaff.filter(cs => !isGated(cs.title) || hasMatchingAssignment(cs.title));
 
-  const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "", manuallyAdded: true, pickerKind: "division" }] });
+  const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "", manuallyAdded: true }] });
   const updateCommandStaff = (id, patch) => setOrg({ ...org, commandStaff: org.commandStaff.map(c => c.id === id ? { ...c, ...patch } : c) });
   const removeCommandStaff = (id) => setOrg({ ...org, commandStaff: org.commandStaff.filter(c => c.id !== id) });
 
@@ -3562,14 +3578,11 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     if (org.sections.some(s => s.id === nodeId)) return;
     setOrg({ ...org, sections: deleteOrgNode(org.sections, nodeId) });
   };
-  // pickerKind ("division" or "unit") describes what THIS new node's
-  // own title-picker should offer once it renders — decided by the
-  // caller based on what kind of node it's being added under (see
-  // OrgTree, which passes "division" when adding beneath a top-level
-  // Section Chief/Incident Command, and "unit" when adding beneath
-  // anything else, since anything nested under a division is
-  // presumed to be a unit rather than another division).
-  const addSectionChild = (parentId, pickerKind) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true, pickerKind }) });
+  // manuallyAdded is what OrgTree/OrgBox check to decide whether to
+  // show either field's picker at all — this new node's title
+  // uniformly picks from divisions/assignments and its name uniformly
+  // picks from units, regardless of what it's nested under.
+  const addSectionChild = (parentId) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true }) });
 
   const updateIncidentCommandNode = (nodeId, patch) => {
     if (!org.incidentCommand) return;
@@ -3585,9 +3598,9 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     setOrg({ ...org, incidentCommand: deleteOrgNode([org.incidentCommand], nodeId)[0] });
   };
   // Same reasoning as addSectionChild above.
-  const addIncidentCommandChild = (parentId, pickerKind) => {
+  const addIncidentCommandChild = (parentId) => {
     if (!org.incidentCommand) return;
-    setOrg({ ...org, incidentCommand: addOrgChild([org.incidentCommand], parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true, pickerKind })[0] });
+    setOrg({ ...org, incidentCommand: addOrgChild([org.incidentCommand], parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true })[0] });
   };
 
   const otherVisibleSections = org.sections.filter(s => s.title !== "Operations Section Chief" && (!isGated(s.title) || hasMatchingAssignment(s.title)));
@@ -3614,12 +3627,12 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   <OrgBox
                     title={org.incidentCommand.title} name={org.incidentCommand.name} isRoot
                     onNameChange={v => updateIncidentCommandNode(org.incidentCommand.id, { name: v, autoName: false })}
-                    onAddChild={() => addIncidentCommandChild(org.incidentCommand.id, "unit")}
+                    onAddChild={() => addIncidentCommandChild(org.incidentCommand.id)}
                   />
                   {org.incidentCommand.children && org.incidentCommand.children.length > 0 && (
                     <OrgConnectors>
                       {org.incidentCommand.children.map(child => (
-                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} titleOptions={assignmentPresets} unitOptions={unitOptions} isTopLevel={false} />
+                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} titleOptions={assignmentPresets} unitOptions={unitOptions} />
                       ))}
                     </OrgConnectors>
                   )}
@@ -3632,7 +3645,9 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
                   {visibleCommandStaff.map(cs => (
-                    <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable titleOptions={cs.manuallyAdded ? assignmentPresets : undefined}
+                    <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable
+                      titleOptions={cs.manuallyAdded ? assignmentPresets : undefined}
+                      nameOptions={cs.manuallyAdded ? unitOptions : undefined}
                       onTitleChange={v => updateCommandStaff(cs.id, { title: v })}
                       onNameChange={v => updateCommandStaff(cs.id, { name: v })}
                       onDelete={() => removeCommandStaff(cs.id)} />
@@ -3647,7 +3662,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   org.incidentCommand above instead of here. */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
                 {otherVisibleSections.map(section => (
-                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} titleOptions={assignmentPresets} unitOptions={unitOptions} isTopLevel={true} />
+                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} titleOptions={assignmentPresets} unitOptions={unitOptions} />
                 ))}
               </div>
             </div>
