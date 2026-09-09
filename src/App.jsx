@@ -2226,20 +2226,38 @@ function OrgConnectors({ children }) {
 // into Branches -> Divisions/Groups -> further sub-units arbitrarily
 // deep, since each level is rendered by the same component calling
 // itself on its own children.
-function OrgTree({ node, onUpdate, onDelete, onAddChild, titleOptions }) {
+// isTopLevel marks a node rendered directly by TabOrg (a Section
+// Chief, or Incident Command's own children) as opposed to a node
+// reached only through this component's own recursion — used purely
+// to decide what pickerKind a NEWLY-added child gets: "division"
+// when adding beneath a top-level node (creating a new
+// division/group under a Section Chief or Incident Command), "unit"
+// when adding beneath anything else (a division, presumed to now be
+// getting a unit nested under it rather than another division).
+function OrgTree({ node, onUpdate, onDelete, onAddChild, titleOptions, unitOptions, isTopLevel }) {
+  // Only a manually-added box (via "+ Add Below"/"+ Add Command
+  // Staff" — see manuallyAdded, set at creation in
+  // addSectionChild/addIncidentCommandChild/addCommandStaff) ever
+  // gets a title picker at all. A box that mirrors something on the
+  // Resource Board (an auto-synced division, or a per-unit sub-box)
+  // already has its title determined by the board itself — offering
+  // a picker there would be redundant at best, and at worst let
+  // someone quietly disconnect it from the sync without realizing
+  // that's what editing the title does.
+  const pickerOptions = node.manuallyAdded ? (node.pickerKind === "unit" ? unitOptions : titleOptions) : undefined;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <OrgBox
-        title={node.title} name={node.name} titleEditable titleOptions={titleOptions}
+        title={node.title} name={node.name} titleEditable titleOptions={pickerOptions}
         onTitleChange={v => onUpdate(node.id, { title: v, autoName: false })}
         onNameChange={v => onUpdate(node.id, { name: v, autoName: false })}
         onDelete={() => onDelete(node.id)}
-        onAddChild={() => onAddChild(node.id)}
+        onAddChild={() => onAddChild(node.id, isTopLevel ? "division" : "unit")}
       />
       {node.children && node.children.length > 0 && (
         <OrgConnectors>
           {node.children.map(child => (
-            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} titleOptions={titleOptions} />
+            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} titleOptions={titleOptions} unitOptions={unitOptions} isTopLevel={false} />
           ))}
         </OrgConnectors>
       )}
@@ -3496,7 +3514,7 @@ function TabWeather() {
   );
 }
 
-function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder }) {
+function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder, departments }) {
   // Safety Officer, PIO, Liaison Officer, and the three non-Operations
   // Section Chiefs only render if a matching assignment/division
   // actually exists on the Resource Board right now — otherwise
@@ -3510,6 +3528,12 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
   // division lives regardless of its own name, and IC/Deputy IC are
   // always-relevant top-level roles the user didn't ask to gate.
   const activeAssignments = deriveAssignmentColumns(resources || [], assignmentPresets, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+  // Full list of preset unit names across every department (same
+  // "the full preset list, not just what's currently on the board"
+  // principle as assignmentPresets above) — offered as the picker
+  // options for a manually-added box nested under a division, since
+  // that's presumed to represent a unit rather than another division.
+  const unitOptions = [...new Set((departments || []).flatMap(d => d.units || []))];
   const hasMatchingAssignment = (positionTitle) => {
     const t = String(positionTitle || "").trim().toLowerCase();
     if (!t) return false;
@@ -3522,7 +3546,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
   const isGated = (title) => GATED_TITLES.some(g => g.toLowerCase() === String(title || "").trim().toLowerCase());
   const visibleCommandStaff = org.commandStaff.filter(cs => !isGated(cs.title) || hasMatchingAssignment(cs.title));
 
-  const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "" }] });
+  const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "", manuallyAdded: true, pickerKind: "division" }] });
   const updateCommandStaff = (id, patch) => setOrg({ ...org, commandStaff: org.commandStaff.map(c => c.id === id ? { ...c, ...patch } : c) });
   const removeCommandStaff = (id) => setOrg({ ...org, commandStaff: org.commandStaff.filter(c => c.id !== id) });
 
@@ -3538,7 +3562,14 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     if (org.sections.some(s => s.id === nodeId)) return;
     setOrg({ ...org, sections: deleteOrgNode(org.sections, nodeId) });
   };
-  const addSectionChild = (parentId) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [] }) });
+  // pickerKind ("division" or "unit") describes what THIS new node's
+  // own title-picker should offer once it renders — decided by the
+  // caller based on what kind of node it's being added under (see
+  // OrgTree, which passes "division" when adding beneath a top-level
+  // Section Chief/Incident Command, and "unit" when adding beneath
+  // anything else, since anything nested under a division is
+  // presumed to be a unit rather than another division).
+  const addSectionChild = (parentId, pickerKind) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true, pickerKind }) });
 
   const updateIncidentCommandNode = (nodeId, patch) => {
     if (!org.incidentCommand) return;
@@ -3553,9 +3584,10 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     if (!org.incidentCommand || org.incidentCommand.id === nodeId) return;
     setOrg({ ...org, incidentCommand: deleteOrgNode([org.incidentCommand], nodeId)[0] });
   };
-  const addIncidentCommandChild = (parentId) => {
+  // Same reasoning as addSectionChild above.
+  const addIncidentCommandChild = (parentId, pickerKind) => {
     if (!org.incidentCommand) return;
-    setOrg({ ...org, incidentCommand: addOrgChild([org.incidentCommand], parentId, { id: uid(), title: "Division/Group", name: "", children: [] })[0] });
+    setOrg({ ...org, incidentCommand: addOrgChild([org.incidentCommand], parentId, { id: uid(), title: "Division/Group", name: "", children: [], manuallyAdded: true, pickerKind })[0] });
   };
 
   const otherVisibleSections = org.sections.filter(s => s.title !== "Operations Section Chief" && (!isGated(s.title) || hasMatchingAssignment(s.title)));
@@ -3582,12 +3614,12 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   <OrgBox
                     title={org.incidentCommand.title} name={org.incidentCommand.name} isRoot
                     onNameChange={v => updateIncidentCommandNode(org.incidentCommand.id, { name: v, autoName: false })}
-                    onAddChild={() => addIncidentCommandChild(org.incidentCommand.id)}
+                    onAddChild={() => addIncidentCommandChild(org.incidentCommand.id, "unit")}
                   />
                   {org.incidentCommand.children && org.incidentCommand.children.length > 0 && (
                     <OrgConnectors>
                       {org.incidentCommand.children.map(child => (
-                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} titleOptions={assignmentPresets} />
+                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} titleOptions={assignmentPresets} unitOptions={unitOptions} isTopLevel={false} />
                       ))}
                     </OrgConnectors>
                   )}
@@ -3600,7 +3632,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
                   {visibleCommandStaff.map(cs => (
-                    <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable
+                    <OrgBox key={cs.id} title={cs.title} name={cs.name} titleEditable titleOptions={cs.manuallyAdded ? assignmentPresets : undefined}
                       onTitleChange={v => updateCommandStaff(cs.id, { title: v })}
                       onNameChange={v => updateCommandStaff(cs.id, { name: v })}
                       onDelete={() => removeCommandStaff(cs.id)} />
@@ -3615,7 +3647,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   org.incidentCommand above instead of here. */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
                 {otherVisibleSections.map(section => (
-                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} titleOptions={assignmentPresets} />
+                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} titleOptions={assignmentPresets} unitOptions={unitOptions} isTopLevel={true} />
                 ))}
               </div>
             </div>
@@ -7924,7 +7956,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
               />}
               {tab === "mapping" && <TabMapping mapData={mapData} setMapData={setMapData} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
               {tab === "weather" && <TabWeather />}
-              {tab === "org" && <TabOrg org={org} setOrg={setOrg} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} />}
+              {tab === "org" && <TabOrg org={org} setOrg={setOrg} resources={resources} assignmentPresets={presets.assignments} resourceColumnOrder={resourceColumnOrder} departments={presets.departments} />}
               {tab === "rehab" && <TabRehab rehab={rehab} setRehab={setRehab} resources={resources} now={effectiveNow} />}
               {tab === "icsforms" && (
                 <TabICSForms
