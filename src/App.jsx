@@ -333,12 +333,17 @@ function addOrgChild(sections, parentId, child) {
 // on the full ICS-201 form.
 function flattenOrgFilled(org) {
   const out = [];
-  if (org.ic) out.push({ title: "Incident Commander", name: org.ic });
-  if (org.deputyIc) out.push({ title: "Deputy IC", name: org.deputyIc });
   org.commandStaff.forEach(cs => { if (cs.name) out.push({ title: cs.title, name: cs.name }); });
+  // Operations Section Chief's own {title, name} entry is skipped —
+  // that box was removed from the org chart UI, along with
+  // Incident Commander/Deputy IC — but its children (the auto-synced
+  // divisions) still walk through normally, at the same depth as if
+  // they were direct top-level sections, matching how they're now
+  // promoted to that same visual level in the UI itself.
   const walk = (node, depth) => {
-    if (node.name) out.push({ title: node.title, name: node.name, depth });
-    (node.children || []).forEach(c => walk(c, depth + 1));
+    const isOps = node.title === "Operations Section Chief";
+    if (!isOps && node.name) out.push({ title: node.title, name: node.name, depth });
+    (node.children || []).forEach(c => walk(c, isOps ? depth : depth + 1));
   };
   org.sections.forEach(s => walk(s, 0));
   return out;
@@ -3348,40 +3353,38 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
   const GATED_TITLES = ["Safety Officer", "Public Information Officer", "Liaison Officer", "Planning Section Chief", "Logistics Section Chief", "Finance/Admin Section Chief"];
   const isGated = (title) => GATED_TITLES.some(g => g.toLowerCase() === String(title || "").trim().toLowerCase());
   const visibleCommandStaff = org.commandStaff.filter(cs => !isGated(cs.title) || hasMatchingAssignment(cs.title));
-  const visibleSections = org.sections.filter(s => !isGated(s.title) || hasMatchingAssignment(s.title));
 
-  const setIc = (v) => setOrg({ ...org, ic: v });
-  const setDeputyIc = (v) => setOrg({ ...org, deputyIc: v });
   const addCommandStaff = () => setOrg({ ...org, commandStaff: [...org.commandStaff, { id: uid(), title: "New Position", name: "" }] });
   const updateCommandStaff = (id, patch) => setOrg({ ...org, commandStaff: org.commandStaff.map(c => c.id === id ? { ...c, ...patch } : c) });
   const removeCommandStaff = (id) => setOrg({ ...org, commandStaff: org.commandStaff.filter(c => c.id !== id) });
 
   const updateSection = (nodeId, patch) => setOrg({ ...org, sections: updateOrgNode(org.sections, nodeId, patch) });
   const deleteSection = (nodeId) => {
-    // The four Section Chief boxes are the permanent top level — only
-    // nodes added underneath them (Branches/Divisions/Groups/etc.) can
-    // actually be removed.
+    // The four Section Chief nodes underneath org.sections are still
+    // a permanent, non-deletable top level in the underlying data —
+    // this guard is unchanged even though Operations Section Chief's
+    // own box is no longer rendered at all (its children/divisions
+    // are promoted to render directly instead). Only nodes actually
+    // added underneath a section (divisions, and anything nested
+    // further under those) can be removed via this function.
     if (org.sections.some(s => s.id === nodeId)) return;
     setOrg({ ...org, sections: deleteOrgNode(org.sections, nodeId) });
   };
   const addSectionChild = (parentId) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [] }) });
 
+  const opsSection = org.sections.find(s => s.title === "Operations Section Chief");
+  const opsDivisions = opsSection ? (opsSection.children || []) : [];
+  const otherVisibleSections = org.sections.filter(s => s.title !== "Operations Section Chief" && (!isGated(s.title) || hasMatchingAssignment(s.title)));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Organization Chart" icon={Shield}>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 18, lineHeight: 1.5 }}>
-          Type a name into any box to fill that position. Use "+ Add Below" on a Section Chief (or any box beneath one) to expand into Branches, Divisions, or Groups — add as many levels as the incident needs.
+          Type a name into any box to fill that position. Use "+ Add Below" to expand into further sub-units — add as many levels as the incident needs.
         </div>
         <div style={{ overflowX: "auto", paddingBottom: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "fit-content", margin: "0 auto" }}>
-            {/* Incident Commander (+ optional Deputy) at the top */}
-            <div style={{ display: "flex", gap: 10 }}>
-              <OrgBox title="Incident Commander" name={org.ic} onNameChange={setIc} isRoot />
-              <OrgBox title="Deputy IC" name={org.deputyIc} onNameChange={setDeputyIc} isRoot />
-            </div>
-
-            <div style={{ width: 2, height: 16, background: COLORS.line }} />
-            <div style={{ display: "flex", gap: 40, borderTop: `2px solid ${COLORS.line}`, paddingTop: 16, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 40, flexWrap: "wrap", justifyContent: "center" }}>
               {/* Command Staff cluster */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
@@ -3396,10 +3399,15 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   + Add Command Staff
                 </button>
               </div>
-              {/* Section Chiefs, each independently expandable */}
+              {/* Non-Operations Section Chiefs (gated), plus Operations'
+                  own divisions promoted directly to this level in
+                  place of a dedicated Operations Section Chief box. */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-                {visibleSections.map(section => (
+                {otherVisibleSections.map(section => (
                   <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
+                ))}
+                {opsDivisions.map(division => (
+                  <OrgTree key={division.id} node={division} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
                 ))}
               </div>
             </div>
