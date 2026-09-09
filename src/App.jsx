@@ -2144,7 +2144,13 @@ function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild
         </button>
       )}
       {titleEditable ? (
-        <TextInput value={title} onChange={e => onTitleChange(e.target.value)}
+        // list="cb-org-title-options" ties this to the single shared
+        // <datalist> rendered once in TabOrg — lets a box's title be
+        // typed freely (same as before) OR picked from a dropdown of
+        // whatever assignments/divisions are currently active on the
+        // Resource Board, without needing to retype an existing
+        // division's name by hand.
+        <TextInput value={title} onChange={e => onTitleChange(e.target.value)} list="cb-org-title-options"
           style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", marginBottom: 5, color: COLORS.amber }} />
       ) : (
         <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", color: COLORS.amber, marginBottom: 5, lineHeight: 1.3 }}>{title}</div>
@@ -3525,8 +3531,18 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Organization Chart" icon={Shield}>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 18, lineHeight: 1.5 }}>
-          Type a name into any box to fill that position. Use "+ Add Below" to expand into further sub-units — add as many levels as the incident needs.
+          Type a name into any box to fill that position. Use "+ Add Below" to expand into further sub-units — add as many levels as the incident needs. A box's title can be typed freely or picked from a dropdown of every assignment/division set up under Manage Resources.
         </div>
+        {/* Referenced by every OrgBox's title field via
+            list="cb-org-title-options" — one shared datalist, not one
+            per box, since a <datalist> is looked up by id globally in
+            the DOM regardless of how many inputs reference it. Uses
+            the full assignmentPresets master list (managed under
+            Manage Resources), not just activeAssignments (what's
+            currently in use on the board) — every assignment/division
+            ever defined should be pickable here, not only the ones
+            with a unit assigned to them at this exact moment. */}
+        <datalist id="cb-org-title-options">{assignmentPresets.map(a => <option key={a} value={a} />)}</datalist>
         <div style={{ overflowX: "auto", paddingBottom: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "fit-content", margin: "0 auto" }}>
             {/* Incident Command, auto-synced from the Resource Board —
