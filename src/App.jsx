@@ -1492,7 +1492,7 @@ function ManageResourcesModal({
 }
 
 function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepartment, assignmentPresets, onSaveAssignmentPreset, resourceKindPresets, onAddResourceKind, taskPresets, onSaveTaskPreset, incidentType, assignmentsByType, tasksByType }) {
-  const [f, setF] = useState({ label: "", kind: resourceKindPresets[0] || "", personnel: 1, assignment: "", task: "" });
+  const [f, setF] = useState({ label: "", kind: "", personnel: 1, assignment: "", task: "" });
   const [deptId, setDeptId] = useState("");
   const [addingField, setAddingField] = useState(null); // null | "department" | "unit" | "assignment" | "task"
   const [newValue, setNewValue] = useState("");
@@ -1518,9 +1518,21 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
     // just looking untidy.
     if (!f.label.trim()) { setCheckInError("Resource name is required."); return; }
     if (!f.assignment) { setCheckInError("Assignment/Division is required to check in a resource."); return; }
+    // Same reasoning as Assignment/Division above — Type used to
+    // always have a real value by default (the first resourceKinds
+    // preset), so this case never came up before; now that it starts
+    // blank and is usually filled by auto-detection instead, an
+    // unrecognized unit name could otherwise slip through checked in
+    // with no type at all.
+    if (!f.kind) { setCheckInError("Type is required to check in a resource."); return; }
     setCheckInError("");
     onAdd({ id: uid(), label: f.label.trim(), kind: f.kind, department: selectedDept ? selectedDept.name : "", personnel: Number(f.personnel) || 1, assignment: f.assignment, task: f.task, status: ACTIVE_STATUS, statusSince: nowISO(), checkIn: nowISO(), notes: "", history: [{ status: ACTIVE_STATUS, at: nowISO() }] });
-    setF({ label: "", kind: f.kind, personnel: 1, assignment: "", task: "" });
+    // Resets kind to "" too, not just label — with auto-detection now
+    // filling this in from the unit itself, carrying the previous
+    // unit's type forward would just be a stale leftover the next
+    // pick immediately overwrites anyway, and briefly showing it
+    // implies a real default that isn't there.
+    setF({ label: "", kind: "", personnel: 1, assignment: "", task: "" });
   };
 
   const startAdding = (field) => { setAddingField(field); setNewValue(""); };
@@ -1544,7 +1556,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
     } else if (addingField === "unit") {
       onAddUnitUnderDepartment(deptId, name);
       const detected = applyDetectedKind(name);
-      setF(prev => ({ ...prev, label: name, kind: detected || prev.kind }));
+      setF(prev => ({ ...prev, label: name, kind: detected || "" }));
     } else if (addingField === "task") {
       onSaveTaskPreset(name);
       setF(prev => ({ ...prev, task: name }));
@@ -1591,7 +1603,12 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
             if (e.target.value === "__add_new__") startAdding("unit");
             else {
               const detected = applyDetectedKind(e.target.value);
-              setF({ ...f, label: e.target.value, kind: detected || f.kind });
+              // detected || "" here, not detected || f.kind — a fresh
+              // unit selection should always reflect ONLY what that
+              // specific unit's name detects (or genuinely nothing,
+              // prompting a manual pick), never silently carry over a
+              // different, previously-selected unit's type.
+              setF({ ...f, label: e.target.value, kind: detected || "" });
             }
           }} style={{ width: 200 }} title={!selectedDept ? "Select a department first" : undefined}>
             <option value="">{selectedDept ? "Select a unit..." : "Select department first..."}</option>
@@ -1602,6 +1619,7 @@ function ResourceForm({ onAdd, departments, onAddDepartment, onAddUnitUnderDepar
       </Field>
       <Field label="Type">
         <Select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })} style={{ width: 150 }}>
+          <option value="">Select unit first</option>
           {resourceKindPresets.map(k => <option key={k} value={k}>{k}</option>)}
         </Select>
       </Field>
@@ -2028,8 +2046,8 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <OrgBox
         title={node.title} name={node.name} titleEditable
-        onTitleChange={v => onUpdate(node.id, { title: v })}
-        onNameChange={v => onUpdate(node.id, { name: v })}
+        onTitleChange={v => onUpdate(node.id, { title: v, autoName: false })}
+        onNameChange={v => onUpdate(node.id, { name: v, autoName: false })}
         onDelete={() => onDelete(node.id)}
         onAddChild={() => onAddChild(node.id)}
       />
@@ -7401,6 +7419,109 @@ function AppInner({ onLock, theme, toggleTheme }) {
     const interval = setInterval(checkDue, 60 * 1000);
     return () => clearInterval(interval);
   }, [ready, incidentLoaded, incident.type, incident.lastParAt, incident.opStart, incident.opEnd, incident.parReminderActive, presets.parIntervalMinutes]);
+
+  // Auto-syncs the Org Chart's Division/Group boxes under Operations
+  // from the Resource Board's own current assignments, rather than
+  // requiring every division, its chief, and every unit under it to
+  // be typed in by hand. Any unit whose name starts with "C" (Command
+  // Vehicle, per the same designation-letter convention used for
+  // auto-detecting resource type at check-in) is treated as that
+  // division's chief and fills the division box itself; every OTHER
+  // unit in that division gets its own sub-box underneath, titled
+  // with the unit's resource type and named after the unit itself.
+  // Uses the functional setOrg(prev => ...) form specifically so this
+  // effect never needs org itself as a dependency — it always reads
+  // the true latest org state at the moment it runs, without needing
+  // to re-run every time org changes for an unrelated reason (editing
+  // the IC's name, say).
+  //
+  // Division boxes themselves are never deleted, even if the division
+  // temporarily has no units — it's a persistent organizational slot,
+  // and the user may have added detail under it worth keeping. A
+  // sub-box is different: its entire purpose is to mirror one
+  // specific unit's presence in this division right now, so an
+  // auto-managed one IS removed the moment that's no longer true
+  // (the unit moved divisions, was released, etc.) — leaving it
+  // behind would be actively wrong, not just stale. Sub-boxes are
+  // matched by the underlying resource's own id (sourceResourceId),
+  // not by whatever text happens to be showing, so a manual rename
+  // doesn't cause a duplicate to appear alongside it. And exactly
+  // like the division box's own name, nothing here ever overwrites —
+  // or auto-deletes — a box a human has actually typed into
+  // themselves (autoName, cleared to false the moment that happens in
+  // OrgTree).
+  useEffect(() => {
+    if (!ready || !incidentLoaded) return;
+    setOrg(prev => {
+      const opsSection = prev.sections.find(s => s.title === "Operations Section Chief");
+      if (!opsSection) return prev;
+      const activeDivisions = deriveAssignmentColumns(resources, presets.assignments, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+      const nextDivisionNodes = [...(opsSection.children || [])];
+      let changed = false;
+
+      activeDivisions.forEach(divisionName => {
+        const unitsHere = resources.filter(r => columnFor(r) === divisionName);
+        const chiefUnit = unitsHere.find(r => r.label && r.label.trim().toUpperCase().startsWith("C"));
+        const chiefName = chiefUnit ? chiefUnit.label : "";
+        const nonChiefUnits = chiefUnit ? unitsHere.filter(r => r.id !== chiefUnit.id) : unitsHere;
+
+        let divisionIdx = nextDivisionNodes.findIndex(c => c.title === divisionName);
+        let divisionNode;
+        if (divisionIdx === -1) {
+          divisionNode = { id: uid(), title: divisionName, name: chiefName, children: [], autoName: true };
+          nextDivisionNodes.push(divisionNode);
+          divisionIdx = nextDivisionNodes.length - 1;
+          changed = true;
+        } else {
+          divisionNode = nextDivisionNodes[divisionIdx];
+          if (divisionNode.autoName !== false && divisionNode.name !== chiefName) {
+            divisionNode = { ...divisionNode, name: chiefName, autoName: true };
+            nextDivisionNodes[divisionIdx] = divisionNode;
+            changed = true;
+          }
+        }
+
+        const existingSubBoxes = divisionNode.children || [];
+        const nextSubBoxes = [];
+        let subChanged = false;
+        nonChiefUnits.forEach(unit => {
+          const existing = existingSubBoxes.find(c => c.sourceResourceId === unit.id);
+          const kind = unit.kind || "Unit";
+          if (!existing) {
+            nextSubBoxes.push({ id: uid(), title: kind, name: unit.label, children: [], autoName: true, sourceResourceId: unit.id });
+            subChanged = true;
+          } else if (existing.autoName !== false) {
+            if (existing.title !== kind || existing.name !== unit.label) {
+              nextSubBoxes.push({ ...existing, title: kind, name: unit.label });
+              subChanged = true;
+            } else {
+              nextSubBoxes.push(existing);
+            }
+          } else {
+            nextSubBoxes.push(existing);
+          }
+        });
+        // Manually-edited sub-boxes whose unit no longer matches
+        // (moved, released, etc.) are kept rather than dropped —
+        // auto-managed ones for a unit that's simply gone are
+        // correctly NOT re-added above, which is what actually
+        // removes them.
+        existingSubBoxes.forEach(c => {
+          if (c.autoName === false && !nextSubBoxes.some(n => n.id === c.id)) nextSubBoxes.push(c);
+        });
+        if (existingSubBoxes.length !== nextSubBoxes.length) subChanged = true;
+
+        if (subChanged) {
+          divisionNode = { ...divisionNode, children: nextSubBoxes };
+          nextDivisionNodes[divisionIdx] = divisionNode;
+          changed = true;
+        }
+      });
+
+      if (!changed) return prev;
+      return { ...prev, sections: updateOrgNode(prev.sections, opsSection.id, { children: nextDivisionNodes }) };
+    });
+  }, [resources, presets.assignments, resourceColumnOrder, ready, incidentLoaded]);
 
   const startNew = () => {
     applyBlob({ incident: blankIncident(), resources: [], resourceColumnOrder: [], org: blankOrg(), comms: defaultComms(), safety: { opFrom: "", opTo: "", preparedBy: "", position: "", signature: "", dateTime: "", rows: [] }, ics208: defaultIcs208(), ics208hm: defaultIcs208HM(), ics209: defaultIcs209(), ics206: defaultIcs206(), rehab: [], logs: [], formsUsed: {}, mapData: defaultMapData() });
