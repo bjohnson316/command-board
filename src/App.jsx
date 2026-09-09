@@ -472,6 +472,17 @@ function syncDivisionList(names, priorNodes, resources) {
   return { nodes: nextNodes, changed };
 }
 const nowISO = () => new Date().toISOString();
+// Local date/time parts (not nowISO's UTC-based output) suitable for
+// an <input type="date">/<input type="time"> default value — used to
+// auto-fill Date/Time Initiated when a new incident is created, so
+// it reflects the department's own local time rather than potentially
+// being hours off in either direction depending on time zone.
+function nowLocalDateTimeParts() {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return { date, time };
+}
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
 const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString() : "—";
@@ -504,6 +515,13 @@ const priorPeriod = (history) => {
 };
 
 function blankIncident() {
+  // Date/Time Initiated auto-fills to the current local date/time at
+  // creation — same principle as opStart below already being set to
+  // "now" automatically, just for the Tactical Worksheet's own
+  // display field rather than the clock's internal baseline. Still
+  // freely editable afterward if the actual initiation time needs
+  // correcting (a dispatch time entered after the fact, say).
+  const { date: initDate, time: initTime } = nowLocalDateTimeParts();
   return {
     id: uid(),
     name: "",
@@ -515,8 +533,8 @@ function blankIncident() {
     prepPosition: "",
     prepSignature: "",
     prepDateTime: "",
-    dateInitiated: "",
-    timeInitiated: "",
+    dateInitiated: initDate,
+    timeInitiated: initTime,
     timeTerminated: "",
     dateTerminated: "",
     opStart: nowISO(),
