@@ -2132,7 +2132,8 @@ function TabResources({ resources, setResources, now, incident, setIncident, par
 // A single box in the org chart — title (usually fixed, but editable
 // for command-staff and expanded nodes so new positions can be named
 // anything) plus the name of whoever holds it.
-function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild, titleEditable, isRoot }) {
+function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild, titleEditable, isRoot, titleOptions }) {
+  const [showTitlePicker, setShowTitlePicker] = useState(false);
   return (
     <div style={{
       background: isRoot ? COLORS.panel2 : COLORS.panel, border: `1.5px solid ${isRoot ? COLORS.amber : COLORS.line}`,
@@ -2144,18 +2145,50 @@ function OrgBox({ title, name, onTitleChange, onNameChange, onDelete, onAddChild
         </button>
       )}
       {titleEditable ? (
-        // list="cb-org-title-options" ties this to the single shared
-        // <datalist> rendered once in TabOrg — lets a box's title be
-        // typed freely (same as before) OR picked from a dropdown of
-        // whatever assignments/divisions are currently active on the
-        // Resource Board, without needing to retype an existing
-        // division's name by hand.
-        <TextInput value={title} onChange={e => onTitleChange(e.target.value)} list="cb-org-title-options"
-          style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", marginBottom: 5, color: COLORS.amber }} />
+        <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
+          <TextInput value={title} onChange={e => onTitleChange(e.target.value)}
+            style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", padding: "3px 4px", color: COLORS.amber, flex: 1, minWidth: 0 }} />
+          {/* Opens a full modal listing every assignment/division
+              (titleOptions), rather than a browser datalist — a
+              datalist's "show the full list without typing first"
+              behavior is inconsistent across browsers and devices,
+              which was the actual problem being solved here. A modal
+              guarantees the whole list is visible immediately, and
+              (being fixed-position, same as every other modal in this
+              app) can't get clipped by this chart's own horizontal
+              scroll container the way an inline dropdown positioned
+              relative to the box itself could. */}
+          {titleOptions && titleOptions.length > 0 && (
+            <button onClick={() => setShowTitlePicker(true)} title="Pick from existing assignments/divisions"
+              style={{ background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.muted, cursor: "pointer", padding: "0 3px", flexShrink: 0, display: "flex", alignItems: "center" }}>
+              <ChevronDown size={11} />
+            </button>
+          )}
+        </div>
       ) : (
         <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", color: COLORS.amber, marginBottom: 5, lineHeight: 1.3 }}>{title}</div>
       )}
       <TextInput value={name} onChange={e => onNameChange(e.target.value)} placeholder="Name" style={{ fontSize: 12.5, textAlign: "center", padding: "5px 6px" }} />
+      {showTitlePicker && (
+        <div onClick={() => setShowTitlePicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 320, maxHeight: "70vh", overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 13 }}>Pick a Division/Assignment</span>
+              <button onClick={() => setShowTitlePicker(false)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={16} /></button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {titleOptions.map(opt => (
+                <button key={opt} onClick={() => { onTitleChange(opt); setShowTitlePicker(false); }}
+                  style={{ background: "none", border: "none", textAlign: "left", padding: "7px 8px", borderRadius: 4, color: COLORS.text, fontSize: 13, cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.panel2}
+                  onMouseLeave={e => e.currentTarget.style.background = "none"}>
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {onAddChild && (
         <button onClick={onAddChild} title="Add sub-unit below this one" style={{ marginTop: 6, background: "none", border: `1px dashed ${COLORS.line}`, borderRadius: 4, color: COLORS.muted, cursor: "pointer", fontSize: 10, padding: "3px 7px", width: "100%" }}>
           + Add Below
@@ -2193,11 +2226,11 @@ function OrgConnectors({ children }) {
 // into Branches -> Divisions/Groups -> further sub-units arbitrarily
 // deep, since each level is rendered by the same component calling
 // itself on its own children.
-function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
+function OrgTree({ node, onUpdate, onDelete, onAddChild, titleOptions }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <OrgBox
-        title={node.title} name={node.name} titleEditable
+        title={node.title} name={node.name} titleEditable titleOptions={titleOptions}
         onTitleChange={v => onUpdate(node.id, { title: v, autoName: false })}
         onNameChange={v => onUpdate(node.id, { name: v, autoName: false })}
         onDelete={() => onDelete(node.id)}
@@ -2206,7 +2239,7 @@ function OrgTree({ node, onUpdate, onDelete, onAddChild }) {
       {node.children && node.children.length > 0 && (
         <OrgConnectors>
           {node.children.map(child => (
-            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} />
+            <OrgTree key={child.id} node={child} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} titleOptions={titleOptions} />
           ))}
         </OrgConnectors>
       )}
@@ -3531,18 +3564,8 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Panel title="Organization Chart" icon={Shield}>
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 18, lineHeight: 1.5 }}>
-          Type a name into any box to fill that position. Use "+ Add Below" to expand into further sub-units — add as many levels as the incident needs. A box's title can be typed freely or picked from a dropdown of every assignment/division set up under Manage Resources.
+          Type a name into any box to fill that position, or use the ▾ button beside it to pick from the full list of assignments/divisions set up under Manage Resources. Use "+ Add Below" to expand into further sub-units — add as many levels as the incident needs.
         </div>
-        {/* Referenced by every OrgBox's title field via
-            list="cb-org-title-options" — one shared datalist, not one
-            per box, since a <datalist> is looked up by id globally in
-            the DOM regardless of how many inputs reference it. Uses
-            the full assignmentPresets master list (managed under
-            Manage Resources), not just activeAssignments (what's
-            currently in use on the board) — every assignment/division
-            ever defined should be pickable here, not only the ones
-            with a unit assigned to them at this exact moment. */}
-        <datalist id="cb-org-title-options">{assignmentPresets.map(a => <option key={a} value={a} />)}</datalist>
         <div style={{ overflowX: "auto", paddingBottom: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "fit-content", margin: "0 auto" }}>
             {/* Incident Command, auto-synced from the Resource Board —
@@ -3564,7 +3587,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   {org.incidentCommand.children && org.incidentCommand.children.length > 0 && (
                     <OrgConnectors>
                       {org.incidentCommand.children.map(child => (
-                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} />
+                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} titleOptions={assignmentPresets} />
                       ))}
                     </OrgConnectors>
                   )}
@@ -3592,7 +3615,7 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   org.incidentCommand above instead of here. */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
                 {otherVisibleSections.map(section => (
-                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
+                  <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} titleOptions={assignmentPresets} />
                 ))}
               </div>
             </div>
