@@ -252,6 +252,13 @@ function isIncidentCommandName(name) {
   const n = String(name || "").trim().toLowerCase();
   return n === "incident command" || n === "incident commander" || n === "ic";
 }
+// Same idea, for an Operations-named assignment/division on the
+// Resource Board — matched flexibly since a department might call it
+// "Operations", "Operation Section", or just "Ops".
+function isOperationsName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  return n === "ops" || n.includes("operation");
+}
 
 /* ============================================================
    ORG CHART DATA MODEL
@@ -273,6 +280,15 @@ function blankOrg() {
       { id: uid(), title: "Liaison Officer", name: "" },
     ],
     sections: SECTION_CHIEFS.map(title => ({ id: uid(), title, name: "", children: [] })),
+    // Auto-synced from the Resource Board (see the sync effect in
+    // AppInner) when "Incident Command" and "Operations" themselves
+    // exist as assignments/divisions there — rendered as its own
+    // standalone box above everything else, with Operations nested
+    // as its child and every regular division nested under that, in
+    // place of using org.sections' own Operations Section Chief slot
+    // (which stays available, gated, for a department that manages
+    // Operations manually instead rather than through the board).
+    incidentCommand: null,
   };
 }
 
@@ -280,7 +296,7 @@ function normalizeOrg(org) {
   if (!org) return blankOrg();
   if (org.sections) {
     // Already the current shape — fill in anything defensively missing.
-    return { ic: org.ic || "", deputyIc: org.deputyIc || "", commandStaff: org.commandStaff || [], sections: org.sections || [] };
+    return { ic: org.ic || "", deputyIc: org.deputyIc || "", commandStaff: org.commandStaff || [], sections: org.sections || [], incidentCommand: org.incidentCommand || null };
   }
   // Old shape: { positions: { [fixedTitle]: name }, divisions: [{id,name,supervisor}] }
   const positions = org.positions || {};
@@ -303,6 +319,7 @@ function normalizeOrg(org) {
         ? divisions.map(d => ({ id: d.id || uid(), title: d.name || "Division/Group", name: d.supervisor || "", children: [] }))
         : [],
     })),
+    incidentCommand: null,
   };
 }
 
@@ -334,18 +351,20 @@ function addOrgChild(sections, parentId, child) {
 function flattenOrgFilled(org) {
   const out = [];
   org.commandStaff.forEach(cs => { if (cs.name) out.push({ title: cs.title, name: cs.name }); });
-  // Operations Section Chief's own {title, name} entry is skipped —
-  // that box was removed from the org chart UI, along with
-  // Incident Commander/Deputy IC — but its children (the auto-synced
-  // divisions) still walk through normally, at the same depth as if
-  // they were direct top-level sections, matching how they're now
-  // promoted to that same visual level in the UI itself.
+  // Operations Section Chief's own {title, name} entry (in
+  // org.sections) is skipped — that box was removed from the org
+  // chart UI. Incident Command/Operations/every division now live
+  // entirely under org.incidentCommand instead (see the sync effect
+  // in AppInner), walked in separately below at normal depth since
+  // it's a genuinely separate structure now, not nested under
+  // org.sections at all.
   const walk = (node, depth) => {
     const isOps = node.title === "Operations Section Chief";
     if (!isOps && node.name) out.push({ title: node.title, name: node.name, depth });
     (node.children || []).forEach(c => walk(c, isOps ? depth : depth + 1));
   };
   org.sections.forEach(s => walk(s, 0));
+  if (org.incidentCommand) walk(org.incidentCommand, 0);
   return out;
 }
 // Every node's title, at any depth — used to populate the
@@ -355,11 +374,97 @@ function flattenOrgTitles(org) {
   const out = [];
   const walk = (node) => { if (node.title) out.push(node.title); (node.children || []).forEach(walk); };
   org.sections.forEach(walk);
+  if (org.incidentCommand) walk(org.incidentCommand);
   return out;
 }
 
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// Builds/updates the sub-boxes (one per non-chief unit) for a
+// division-style node. Shared across every level of the Org Chart
+// sync (regular divisions, and Operations'/Incident Command's own
+// directly-assigned units) since the same rule applies identically
+// everywhere: one sub-box per unit, matched by the unit's own id
+// (sourceResourceId) rather than by whatever text happens to be
+// showing (so a manual rename never causes a duplicate), and an
+// auto-managed sub-box for a unit that's moved on is dropped, while a
+// manually-edited one never is, regardless of what happened to its
+// unit.
+function syncSubBoxes(existingChildren, nonChiefUnits) {
+  const nextChildren = [];
+  let changed = false;
+  nonChiefUnits.forEach(unit => {
+    const existing = existingChildren.find(c => c.sourceResourceId === unit.id);
+    const kind = unit.kind || "Unit";
+    if (!existing) {
+      nextChildren.push({ id: uid(), title: kind, name: unit.label, children: [], autoName: true, sourceResourceId: unit.id });
+      changed = true;
+    } else if (existing.autoName !== false) {
+      if (existing.title !== kind || existing.name !== unit.label) {
+        nextChildren.push({ ...existing, title: kind, name: unit.label });
+        changed = true;
+      } else {
+        nextChildren.push(existing);
+      }
+    } else {
+      nextChildren.push(existing);
+    }
+  });
+  existingChildren.forEach(c => {
+    if (c.autoName === false && !nextChildren.some(n => n.id === c.id)) nextChildren.push(c);
+  });
+  if (existingChildren.length !== nextChildren.length) changed = true;
+  return { children: nextChildren, changed };
+}
+
+// Builds/updates a single division-style node's own name (its chief —
+// the first "C"-prefixed unit assigned to it) given the division
+// name, an existing node to preserve manual edits on, and the current
+// resources. Returns the node's non-chief units alongside it, for the
+// caller to hand to syncSubBoxes — this function only ever touches
+// the node's own {name}, never its children, since what belongs
+// there varies by level (a regular division gets only its own unit
+// sub-boxes; Operations/Incident Command get a mix of their own
+// sub-boxes AND a nested division-style node underneath).
+function syncDivisionChiefName(divisionName, existingNode, resources) {
+  const unitsHere = resources.filter(r => columnFor(r) === divisionName);
+  const chiefUnit = unitsHere.find(r => r.label && r.label.trim().toUpperCase().startsWith("C"));
+  const chiefName = chiefUnit ? chiefUnit.label : "";
+  const nonChiefUnits = chiefUnit ? unitsHere.filter(r => r.id !== chiefUnit.id) : unitsHere;
+  let node = existingNode;
+  let changed = false;
+  if (!node) {
+    node = { id: uid(), title: divisionName, name: chiefName, children: [], autoName: true };
+    changed = true;
+  } else if (node.autoName !== false && node.name !== chiefName) {
+    node = { ...node, name: chiefName, autoName: true };
+    changed = true;
+  }
+  return { node, nonChiefUnits, changed };
+}
+
+// Builds/updates a full list of division-style nodes (chief name +
+// that division's own unit sub-boxes) from a list of active division
+// names, reusing priorNodes by title match. A node for a name no
+// longer active is dropped UNLESS it's been manually edited
+// (autoName === false), which is always kept regardless.
+function syncDivisionList(names, priorNodes, resources) {
+  const nextNodes = [];
+  let changed = false;
+  names.forEach(name => {
+    const existing = priorNodes.find(n => n.title === name);
+    const { node, nonChiefUnits, changed: chiefChanged } = syncDivisionChiefName(name, existing, resources);
+    const { children, changed: subChanged } = syncSubBoxes(node.children || [], nonChiefUnits);
+    if (chiefChanged || subChanged) changed = true;
+    nextNodes.push({ ...node, children });
+  });
+  priorNodes.forEach(n => {
+    if (n.autoName === false && !nextNodes.some(x => x.id === n.id)) nextNodes.push(n);
+  });
+  if (priorNodes.length !== nextNodes.length) changed = true;
+  return { nodes: nextNodes, changed };
+}
 const nowISO = () => new Date().toISOString();
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
 const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -3372,8 +3477,24 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
   };
   const addSectionChild = (parentId) => setOrg({ ...org, sections: addOrgChild(org.sections, parentId, { id: uid(), title: "Division/Group", name: "", children: [] }) });
 
-  const opsSection = org.sections.find(s => s.title === "Operations Section Chief");
-  const opsDivisions = opsSection ? (opsSection.children || []) : [];
+  const updateIncidentCommandNode = (nodeId, patch) => {
+    if (!org.incidentCommand) return;
+    setOrg({ ...org, incidentCommand: updateOrgNode([org.incidentCommand], nodeId, patch)[0] });
+  };
+  const deleteIncidentCommandNode = (nodeId) => {
+    // Guards against deleting the auto-synced root itself via the UI
+    // — it isn't exposed a delete button anyway (rendered manually
+    // below without one), but this stays defensive in case that ever
+    // changes. Only nodes actually nested underneath it (divisions,
+    // and anything further under those) are removable this way.
+    if (!org.incidentCommand || org.incidentCommand.id === nodeId) return;
+    setOrg({ ...org, incidentCommand: deleteOrgNode([org.incidentCommand], nodeId)[0] });
+  };
+  const addIncidentCommandChild = (parentId) => {
+    if (!org.incidentCommand) return;
+    setOrg({ ...org, incidentCommand: addOrgChild([org.incidentCommand], parentId, { id: uid(), title: "Division/Group", name: "", children: [] })[0] });
+  };
+
   const otherVisibleSections = org.sections.filter(s => s.title !== "Operations Section Chief" && (!isGated(s.title) || hasMatchingAssignment(s.title)));
 
   return (
@@ -3384,6 +3505,33 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
         </div>
         <div style={{ overflowX: "auto", paddingBottom: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "fit-content", margin: "0 auto" }}>
+            {/* Incident Command, auto-synced from the Resource Board —
+                wraps Operations, which wraps every regular division —
+                shown above everything else. Rendered manually (not
+                via OrgTree) specifically so this root box has no
+                delete button of its own, since it's meant to mirror
+                the board, not be removable by hand; its children
+                still use the normal OrgTree and so are freely
+                editable/removable like anything else. */}
+            {org.incidentCommand && (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <OrgBox
+                    title={org.incidentCommand.title} name={org.incidentCommand.name} isRoot
+                    onNameChange={v => updateIncidentCommandNode(org.incidentCommand.id, { name: v, autoName: false })}
+                    onAddChild={() => addIncidentCommandChild(org.incidentCommand.id)}
+                  />
+                  {org.incidentCommand.children && org.incidentCommand.children.length > 0 && (
+                    <OrgConnectors>
+                      {org.incidentCommand.children.map(child => (
+                        <OrgTree key={child.id} node={child} onUpdate={updateIncidentCommandNode} onDelete={deleteIncidentCommandNode} onAddChild={addIncidentCommandChild} />
+                      ))}
+                    </OrgConnectors>
+                  )}
+                </div>
+                <div style={{ width: 2, height: 16, background: COLORS.line }} />
+              </>
+            )}
             <div style={{ display: "flex", gap: 40, flexWrap: "wrap", justifyContent: "center" }}>
               {/* Command Staff cluster */}
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -3399,15 +3547,12 @@ function TabOrg({ org, setOrg, resources, assignmentPresets, resourceColumnOrder
                   + Add Command Staff
                 </button>
               </div>
-              {/* Non-Operations Section Chiefs (gated), plus Operations'
-                  own divisions promoted directly to this level in
-                  place of a dedicated Operations Section Chief box. */}
+              {/* Non-Operations Section Chiefs (gated) — Operations
+                  itself and all divisions now live under
+                  org.incidentCommand above instead of here. */}
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
                 {otherVisibleSections.map(section => (
                   <OrgTree key={section.id} node={section} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
-                ))}
-                {opsDivisions.map(division => (
-                  <OrgTree key={division.id} node={division} onUpdate={updateSection} onDelete={deleteSection} onAddChild={addSectionChild} />
                 ))}
               </div>
             </div>
@@ -7466,113 +7611,85 @@ function AppInner({ onLock, theme, toggleTheme }) {
     return () => clearInterval(interval);
   }, [ready, incidentLoaded, incident.type, incident.lastParAt, incident.opStart, incident.opEnd, incident.parReminderActive, presets.parIntervalMinutes]);
 
-  // Auto-syncs the Org Chart's Division/Group boxes under Operations
-  // from the Resource Board's own current assignments, rather than
-  // requiring every division, its chief, and every unit under it to
-  // be typed in by hand. Any unit whose name starts with "C" (Command
-  // Vehicle, per the same designation-letter convention used for
-  // auto-detecting resource type at check-in) is treated as that
-  // division's chief and fills the division box itself; every OTHER
-  // unit in that division gets its own sub-box underneath, titled
-  // with the unit's resource type and named after the unit itself.
+  // Auto-syncs the Org Chart from the Resource Board's own current
+  // assignments, rather than requiring every division, its chief,
+  // and every unit under it to be typed in by hand. Any unit whose
+  // name starts with "C" (Command Vehicle, per the same
+  // designation-letter convention used for auto-detecting resource
+  // type at check-in) is treated as that division's chief and fills
+  // the division box itself; every OTHER unit in that division gets
+  // its own sub-box underneath, titled with the unit's resource type
+  // and named after the unit itself.
+  //
+  // "Incident Command" and "Operations" are themselves
+  // assignments/divisions on the Resource Board (per the user's own
+  // setup) rather than fixed template boxes, so they're synced the
+  // exact same way as any other division — just deliberately nested
+  // in a fixed hierarchy: Incident Command at the very top (if that
+  // assignment exists), wrapping Operations (if that assignment
+  // exists), wrapping every regular division underneath. If only one
+  // of Incident Command/Operations exists, whichever does becomes the
+  // top-level wrapper instead. If neither exists, nothing here is
+  // built or torn down — org.incidentCommand is left exactly as it
+  // was, same as the "never delete" principle for a regular division.
+  //
   // Uses the functional setOrg(prev => ...) form specifically so this
   // effect never needs org itself as a dependency — it always reads
   // the true latest org state at the moment it runs, without needing
   // to re-run every time org changes for an unrelated reason (editing
-  // the IC's name, say).
-  //
-  // Division boxes themselves are never deleted, even if the division
-  // temporarily has no units — it's a persistent organizational slot,
-  // and the user may have added detail under it worth keeping. A
-  // sub-box is different: its entire purpose is to mirror one
-  // specific unit's presence in this division right now, so an
-  // auto-managed one IS removed the moment that's no longer true
-  // (the unit moved divisions, was released, etc.) — leaving it
-  // behind would be actively wrong, not just stale. Sub-boxes are
-  // matched by the underlying resource's own id (sourceResourceId),
-  // not by whatever text happens to be showing, so a manual rename
-  // doesn't cause a duplicate to appear alongside it. And exactly
-  // like the division box's own name, nothing here ever overwrites —
-  // or auto-deletes — a box a human has actually typed into
-  // themselves (autoName, cleared to false the moment that happens in
-  // OrgTree).
+  // a Command Staff name, say).
   useEffect(() => {
     if (!ready || !incidentLoaded) return;
     setOrg(prev => {
-      const opsSection = prev.sections.find(s => s.title === "Operations Section Chief");
-      if (!opsSection) return prev;
-      const activeDivisions = deriveAssignmentColumns(resources, presets.assignments, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col) && !isIncidentCommandName(col));
-      // Retroactively removes an "Incident Command"-named division
-      // node if one already got created under Operations before this
-      // exclusion existed — safe to do since it only ever touches a
-      // node that's still autoName !== false (i.e. nobody has
-      // actually edited it by hand); a manually-edited one, however
-      // it got its title, is left alone like anything else a human
-      // has touched.
-      let nextDivisionNodes = (opsSection.children || []).filter(c => !(isIncidentCommandName(c.title) && c.autoName !== false));
-      let changed = nextDivisionNodes.length !== (opsSection.children || []).length;
+      const allActive = deriveAssignmentColumns(resources, presets.assignments, resourceColumnOrder).filter(col => !STATUS_FLOW.includes(col));
+      const icName = allActive.find(isIncidentCommandName) || null;
+      const opsName = allActive.find(n => n !== icName && isOperationsName(n)) || null;
+      const regularNames = allActive.filter(n => n !== icName && n !== opsName);
 
-      activeDivisions.forEach(divisionName => {
-        const unitsHere = resources.filter(r => columnFor(r) === divisionName);
-        const chiefUnit = unitsHere.find(r => r.label && r.label.trim().toUpperCase().startsWith("C"));
-        const chiefName = chiefUnit ? chiefUnit.label : "";
-        const nonChiefUnits = chiefUnit ? unitsHere.filter(r => r.id !== chiefUnit.id) : unitsHere;
+      if (!icName && !opsName) return prev;
 
-        let divisionIdx = nextDivisionNodes.findIndex(c => c.title === divisionName);
-        let divisionNode;
-        if (divisionIdx === -1) {
-          divisionNode = { id: uid(), title: divisionName, name: chiefName, children: [], autoName: true };
-          nextDivisionNodes.push(divisionNode);
-          divisionIdx = nextDivisionNodes.length - 1;
-          changed = true;
+      let changed = false;
+      const priorTop = prev.incidentCommand;
+      let priorOpsNode = null;
+      if (priorTop) {
+        priorOpsNode = isOperationsName(priorTop.title) ? priorTop : (priorTop.children || []).find(c => isOperationsName(c.title) && !c.sourceResourceId) || null;
+      }
+      const priorRegularNodes = priorOpsNode ? (priorOpsNode.children || []).filter(c => !c.sourceResourceId) : [];
+
+      const { nodes: nextRegularNodes, changed: regularChanged } = syncDivisionList(regularNames, priorRegularNodes, resources);
+      if (regularChanged) changed = true;
+
+      let nextTop;
+      if (opsName) {
+        const { node: opsChiefNode, nonChiefUnits: opsNonChiefUnits, changed: opsChiefChanged } = syncDivisionChiefName(opsName, priorOpsNode, resources);
+        const { children: opsSubBoxes, changed: opsSubChanged } = syncSubBoxes((opsChiefNode.children || []).filter(c => c.sourceResourceId), opsNonChiefUnits);
+        if (opsChiefChanged || opsSubChanged) changed = true;
+        const opsNode = { ...opsChiefNode, children: [...opsSubBoxes, ...nextRegularNodes] };
+
+        if (icName) {
+          const priorIcForChief = (priorTop && isIncidentCommandName(priorTop.title)) ? priorTop : null;
+          const { node: icChiefNode, nonChiefUnits: icNonChiefUnits, changed: icChiefChanged } = syncDivisionChiefName(icName, priorIcForChief, resources);
+          const { children: icSubBoxes, changed: icSubChanged } = syncSubBoxes((icChiefNode.children || []).filter(c => c.sourceResourceId), icNonChiefUnits);
+          if (icChiefChanged || icSubChanged) changed = true;
+          nextTop = { ...icChiefNode, children: [...icSubBoxes, opsNode] };
         } else {
-          divisionNode = nextDivisionNodes[divisionIdx];
-          if (divisionNode.autoName !== false && divisionNode.name !== chiefName) {
-            divisionNode = { ...divisionNode, name: chiefName, autoName: true };
-            nextDivisionNodes[divisionIdx] = divisionNode;
-            changed = true;
-          }
+          // No Incident Command division exists — Operations itself
+          // becomes the top-level node.
+          nextTop = opsNode;
         }
-
-        const existingSubBoxes = divisionNode.children || [];
-        const nextSubBoxes = [];
-        let subChanged = false;
-        nonChiefUnits.forEach(unit => {
-          const existing = existingSubBoxes.find(c => c.sourceResourceId === unit.id);
-          const kind = unit.kind || "Unit";
-          if (!existing) {
-            nextSubBoxes.push({ id: uid(), title: kind, name: unit.label, children: [], autoName: true, sourceResourceId: unit.id });
-            subChanged = true;
-          } else if (existing.autoName !== false) {
-            if (existing.title !== kind || existing.name !== unit.label) {
-              nextSubBoxes.push({ ...existing, title: kind, name: unit.label });
-              subChanged = true;
-            } else {
-              nextSubBoxes.push(existing);
-            }
-          } else {
-            nextSubBoxes.push(existing);
-          }
-        });
-        // Manually-edited sub-boxes whose unit no longer matches
-        // (moved, released, etc.) are kept rather than dropped —
-        // auto-managed ones for a unit that's simply gone are
-        // correctly NOT re-added above, which is what actually
-        // removes them.
-        existingSubBoxes.forEach(c => {
-          if (c.autoName === false && !nextSubBoxes.some(n => n.id === c.id)) nextSubBoxes.push(c);
-        });
-        if (existingSubBoxes.length !== nextSubBoxes.length) subChanged = true;
-
-        if (subChanged) {
-          divisionNode = { ...divisionNode, children: nextSubBoxes };
-          nextDivisionNodes[divisionIdx] = divisionNode;
-          changed = true;
-        }
-      });
+      } else {
+        // No Operations division exists — Incident Command directly
+        // wraps the regular divisions, with no Operations layer
+        // between them.
+        const priorIcForChief = (priorTop && isIncidentCommandName(priorTop.title)) ? priorTop : null;
+        const { node: icChiefNode, nonChiefUnits: icNonChiefUnits, changed: icChiefChanged } = syncDivisionChiefName(icName, priorIcForChief, resources);
+        const { children: icSubBoxes, changed: icSubChanged } = syncSubBoxes((icChiefNode.children || []).filter(c => c.sourceResourceId), icNonChiefUnits);
+        if (icChiefChanged || icSubChanged) changed = true;
+        nextTop = { ...icChiefNode, children: [...icSubBoxes, ...nextRegularNodes] };
+      }
 
       if (!changed) return prev;
-      return { ...prev, sections: updateOrgNode(prev.sections, opsSection.id, { children: nextDivisionNodes }) };
+      return { ...prev, incidentCommand: nextTop };
     });
   }, [resources, presets.assignments, resourceColumnOrder, ready, incidentLoaded]);
 
