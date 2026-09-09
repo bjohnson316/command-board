@@ -256,8 +256,14 @@ function isIncidentCommandName(name) {
 // Resource Board — matched flexibly since a department might call it
 // "Operations", "Operation Section", or just "Ops".
 function isOperationsName(name) {
+  // Exact matching only, same as isIncidentCommandName above — a
+  // substring match (name.includes("operation")) was catching
+  // "Water Operations" and any similar functional division name as
+  // if it were the generic Operations section itself, incorrectly
+  // treating it as the wrapper for every other division rather than
+  // a regular division nested underneath it.
   const n = String(name || "").trim().toLowerCase();
-  return n === "ops" || n.includes("operation");
+  return n === "operations" || n === "operation section" || n === "operations section" || n === "ops";
 }
 
 /* ============================================================
