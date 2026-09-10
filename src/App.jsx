@@ -6760,6 +6760,7 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
   const active = index.filter(i => !i.archived);
   const archivedCount = index.length - active.length;
   const [confirmAction, setConfirmAction] = useState(null); // { type: "archive" | "delete", id, name }
+  const [showLibMenu, setShowLibMenu] = useState(false);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 480, maxHeight: "80vh", overflow: "auto" }}>
@@ -6773,10 +6774,36 @@ function LibraryModal({ index, onClose, onLoad, onNew, onDelete, onArchive, onOp
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 11, color: COLORS.muted, letterSpacing: "0.05em", textTransform: "uppercase" }}>Incident Library</span>
-            <Btn kind="ghost" icon={Settings} onClick={onOpenAdmin} style={{ padding: "5px 9px", fontSize: 11.5 }}>Admin</Btn>
+            {/* Same menu/drawer pattern as the main header — Admin
+                lives inside it rather than as its own button here,
+                for the same reason it moved there: not something
+                glanced at, just an occasional destination. */}
+            <button onClick={() => setShowLibMenu(true)} title="Menu"
+              style={{ background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 5, color: COLORS.text, cursor: "pointer", padding: "5px 8px", display: "flex", alignItems: "center" }}>
+              <Menu size={16} />
+            </button>
             {!mandatory && <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>}
           </div>
         </div>
+        {showLibMenu && (
+          <div onClick={() => setShowLibMenu(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100 }}>
+            <style>{`@keyframes cbHeaderMenuSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+            <div onClick={e => e.stopPropagation()}
+              style={{
+                position: "absolute", top: 0, right: 0, bottom: 0, width: 240, maxWidth: "85vw",
+                background: COLORS.panel, borderLeft: `1px solid ${COLORS.line}`, boxShadow: "-4px 0 16px rgba(0,0,0,0.4)",
+                padding: 16, overflowY: "auto", animation: "cbHeaderMenuSlideIn 0.2s ease-out",
+                display: "flex", flexDirection: "column", gap: 10,
+              }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Menu</span>
+                <button onClick={() => setShowLibMenu(false)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
+              </div>
+              <Btn kind="ghost" icon={Settings} onClick={() => { setShowLibMenu(false); onOpenAdmin(); }} style={{ width: "100%", justifyContent: "center" }}>Admin</Btn>
+            </div>
+          </div>
+        )}
         <div style={{ padding: 16 }}>
           <div style={{ fontSize: 11.5, color: COLORS.muted, marginBottom: 12, lineHeight: 1.5 }}>
             {mandatory ? "Select an incident to open, or start a new one." : "Shared board — visible and editable by anyone who opens this app. Changes sync to other users within a few seconds."}
@@ -8015,8 +8042,8 @@ function AppInner({ onLock, theme, toggleTheme }) {
                   style={{ width: "100%", justifyContent: "center" }}>
                   {incident.opEnd ? "Resume Clock" : "Stop Clock"}
                 </Btn>
-                <Btn kind="subtle" icon={FolderOpen} onClick={() => { setShowHeaderMenu(false); setShowLib(true); }} style={{ width: "100%", justifyContent: "center" }}>Incidents</Btn>
-                <Btn kind="subtle" icon={Printer} onClick={() => { setShowHeaderMenu(false); downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments, assignmentPresets: presets.assignments, resourceColumnOrder }); }} style={{ width: "100%", justifyContent: "center" }}>Print / Export</Btn>
+                <Btn kind="ghost" icon={FolderOpen} onClick={() => { setShowHeaderMenu(false); setShowLib(true); }} style={{ width: "100%", justifyContent: "center" }}>Incidents</Btn>
+                <Btn kind="ghost" icon={Printer} onClick={() => { setShowHeaderMenu(false); downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments, assignmentPresets: presets.assignments, resourceColumnOrder }); }} style={{ width: "100%", justifyContent: "center" }}>Print / Export</Btn>
                 <Btn kind="ghost" icon={Lock} onClick={() => { setShowHeaderMenu(false); onLock(); }} style={{ width: "100%", justifyContent: "center" }}>Lock</Btn>
                 <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={() => { setShowHeaderMenu(false); toggleTheme(); }} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ width: "100%", justifyContent: "center" }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
                 <Btn kind="ghost" icon={Settings} onClick={() => { setShowHeaderMenu(false); setShowAdminAuth(true); }} style={{ width: "100%", justifyContent: "center" }}>Admin</Btn>
