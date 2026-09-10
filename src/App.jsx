@@ -3756,7 +3756,17 @@ function TabRehab({ rehab, setRehab, resources, now }) {
   const [openId, setOpenId] = useState(null); // which entry's detail view is open
 
   const addEntry = () => {
-    const entry = { id: uid(), name: "", unit: "", timeIn: nowISO(), bp: "", pulse: "", rr: "", spo2: "", temp: "", status: "In Rehab", timeCleared: "", notes: "" };
+    // Two separate vitals sets (In/Out suffix) rather than one shared
+    // set — captured at check-in and again at check-out, so a
+    // meaningful before/after comparison is actually possible rather
+    // than only ever having one snapshot per person.
+    const entry = {
+      id: uid(), name: "", unit: "", timeIn: nowISO(),
+      bpIn: "", pulseIn: "", rrIn: "", spo2In: "", tempIn: "",
+      bpOut: "", pulseOut: "", rrOut: "", spo2Out: "", tempOut: "",
+      fluidBolus: "", nutrientIntake: "",
+      status: "In Rehab", timeCleared: "", notes: "",
+    };
     setRehab([entry, ...rehab]);
     setOpenId(entry.id); // open it immediately so the compact card isn't the only way to fill it in
   };
@@ -3808,21 +3818,46 @@ function TabRehab({ rehab, setRehab, resources, now }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <Field label="Name"><TextInput autoFocus value={openEntry.name} onChange={e => update(openEntry.id, { name: e.target.value })} /></Field>
               <Field label="Unit"><TextInput value={openEntry.unit} onChange={e => update(openEntry.id, { unit: e.target.value })} /></Field>
-              <Field label="BP"><TextInput value={openEntry.bp} onChange={e => update(openEntry.id, { bp: e.target.value })} placeholder="120/80" /></Field>
-              <Field label="Pulse"><TextInput value={openEntry.pulse} onChange={e => update(openEntry.id, { pulse: e.target.value })} /></Field>
-              <Field label="Resp"><TextInput value={openEntry.rr} onChange={e => update(openEntry.id, { rr: e.target.value })} /></Field>
-              <Field label="SpO2"><TextInput value={openEntry.spo2} onChange={e => update(openEntry.id, { spo2: e.target.value })} /></Field>
-              <Field label="Temp"><TextInput value={openEntry.temp} onChange={e => update(openEntry.id, { temp: e.target.value })} /></Field>
+
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 4, borderTop: `1px solid ${COLORS.line}`, paddingTop: 10 }}>
+                Check-In Vitals — {fmtTime(openEntry.timeIn)}
+              </div>
+              <Field label="BP"><TextInput value={openEntry.bpIn} onChange={e => update(openEntry.id, { bpIn: e.target.value })} placeholder="120/80" /></Field>
+              <Field label="Pulse"><TextInput value={openEntry.pulseIn} onChange={e => update(openEntry.id, { pulseIn: e.target.value })} /></Field>
+              <Field label="Resp"><TextInput value={openEntry.rrIn} onChange={e => update(openEntry.id, { rrIn: e.target.value })} /></Field>
+              <Field label="SpO2"><TextInput value={openEntry.spo2In} onChange={e => update(openEntry.id, { spo2In: e.target.value })} /></Field>
+              <Field label="Temp"><TextInput value={openEntry.tempIn} onChange={e => update(openEntry.id, { tempIn: e.target.value })} /></Field>
+
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 4, borderTop: `1px solid ${COLORS.line}`, paddingTop: 10 }}>
+                During Rehab
+              </div>
+              <Field label="Fluid Bolus"><TextInput value={openEntry.fluidBolus} onChange={e => update(openEntry.id, { fluidBolus: e.target.value })} placeholder="1L IV NS, or 32oz PO water" /></Field>
+              <Field label="Nutrient Intake"><TextInput value={openEntry.nutrientIntake} onChange={e => update(openEntry.id, { nutrientIntake: e.target.value })} placeholder="Sandwich, sports drink" /></Field>
+
+              {/* Check-Out vitals are fillable any time (not gated
+                  behind clicking Clear first) — the natural workflow
+                  is taking these vitals AS the reason to decide
+                  someone's ready to clear, not something recorded
+                  only after the fact. */}
+              <div style={{ fontSize: 11, color: COLORS.muted, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 4, borderTop: `1px solid ${COLORS.line}`, paddingTop: 10 }}>
+                Check-Out Vitals{openEntry.timeCleared ? ` — ${fmtTime(openEntry.timeCleared)}` : ""}
+              </div>
+              <Field label="BP"><TextInput value={openEntry.bpOut} onChange={e => update(openEntry.id, { bpOut: e.target.value })} placeholder="120/80" /></Field>
+              <Field label="Pulse"><TextInput value={openEntry.pulseOut} onChange={e => update(openEntry.id, { pulseOut: e.target.value })} /></Field>
+              <Field label="Resp"><TextInput value={openEntry.rrOut} onChange={e => update(openEntry.id, { rrOut: e.target.value })} /></Field>
+              <Field label="SpO2"><TextInput value={openEntry.spo2Out} onChange={e => update(openEntry.id, { spo2Out: e.target.value })} /></Field>
+              <Field label="Temp"><TextInput value={openEntry.tempOut} onChange={e => update(openEntry.id, { tempOut: e.target.value })} /></Field>
+
               <Field label="Status">
                 <Select value={openEntry.status} onChange={e => update(openEntry.id, { status: e.target.value })}>
                   {["In Rehab", "Cleared", "Transported"].map(s => <option key={s}>{s}</option>)}
                 </Select>
               </Field>
               <div style={{ fontSize: 12, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>
-                In: {fmtTime(openEntry.timeIn)} · {elapsed(openEntry.timeIn, openEntry.timeCleared ? new Date(openEntry.timeCleared).getTime() : now)} elapsed
+                Check-In: {fmtTime(openEntry.timeIn)} · {elapsed(openEntry.timeIn, openEntry.timeCleared ? new Date(openEntry.timeCleared).getTime() : now)} elapsed
               </div>
               {openEntry.timeCleared && (
-                <div style={{ fontSize: 12, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>Cleared: {fmtTime(openEntry.timeCleared)}</div>
+                <div style={{ fontSize: 12, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace" }}>Check-Out: {fmtTime(openEntry.timeCleared)}</div>
               )}
               {openEntry.status === "In Rehab" && (
                 <Btn kind="subtle" icon={CheckCircle2} onClick={() => clear(openEntry.id)} style={{ justifyContent: "center" }}>Clear</Btn>
@@ -5136,13 +5171,17 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
     });
   }
 
-  const vitalsSegments = (r) => {
+  // phase: "In" or "Out" — reads bpIn/pulseIn/... or bpOut/pulseOut/...
+  // accordingly, since check-in and check-out vitals are now two
+  // separate sets rather than one shared one.
+  const vitalsSegments = (r, phase) => {
     const segs = [];
-    if (r.bp) segs.push({ text: "BP ", bold: true }, { text: `${r.bp} `, bold: false });
-    if (r.pulse) segs.push({ text: "P ", bold: true }, { text: `${r.pulse} `, bold: false });
-    if (r.rr) segs.push({ text: "R ", bold: true }, { text: `${r.rr} `, bold: false });
-    if (r.spo2) segs.push({ text: "SpO2 ", bold: true }, { text: `${r.spo2} `, bold: false });
-    if (r.temp) segs.push({ text: "T ", bold: true }, { text: `${r.temp}`, bold: false });
+    const bp = r[`bp${phase}`], pulse = r[`pulse${phase}`], rr = r[`rr${phase}`], spo2 = r[`spo2${phase}`], temp = r[`temp${phase}`];
+    if (bp) segs.push({ text: "BP ", bold: true }, { text: `${bp} `, bold: false });
+    if (pulse) segs.push({ text: "P ", bold: true }, { text: `${pulse} `, bold: false });
+    if (rr) segs.push({ text: "R ", bold: true }, { text: `${rr} `, bold: false });
+    if (spo2) segs.push({ text: "SpO2 ", bold: true }, { text: `${spo2} `, bold: false });
+    if (temp) segs.push({ text: "T ", bold: true }, { text: `${temp}`, bold: false });
     return segs;
   };
   // Frozen duration for cleared entries (time-in to time-cleared,
@@ -5150,8 +5189,15 @@ function buildPacketLines({ incident, resources, comms, org, safety, ics208, ics
   // still in rehab at export time, this is elapsed-so-far as of the
   // moment the report was generated, since a PDF is a snapshot.
   const rehabDuration = (r) => r.timeIn ? elapsed(r.timeIn, r.timeCleared ? new Date(r.timeCleared).getTime() : Date.now()) : "-";
-  L.push(...tableLines(["NAME", "UNIT", "TIME IN", "DURATION", "VITALS", "STATUS", "CLEARED", "NOTES"], [160, 40, 50, 55, 190, 65, 50, 102],
-    rehab.map(r => [r.name, r.unit, fmtTimeShort(r.timeIn), rehabDuration(r), vitalsSegments(r), r.status, r.timeCleared ? fmtTimeShort(r.timeCleared) : "", r.notes]), "Rehab / Medical Monitoring"));
+  // Time in/out/duration combined into one compact cell (a table cell
+  // is a single line — see tableLines above — so this keeps three
+  // related, short values readable together instead of needing three
+  // separate narrow columns) — frees up column width for the two new
+  // vitals sets and the fluid/nutrient intake below.
+  const rehabTimes = (r) => `${fmtTimeShort(r.timeIn)} → ${r.timeCleared ? fmtTimeShort(r.timeCleared) : "—"} (${rehabDuration(r)})`;
+  const fluidNutrient = (r) => [r.fluidBolus, r.nutrientIntake].filter(Boolean).join(" / ") || "-";
+  L.push(...tableLines(["NAME", "UNIT", "TIMES (IN → OUT · DUR)", "VITALS — CHECK-IN", "VITALS — CHECK-OUT", "FLUID / NUTRIENT", "STATUS", "NOTES"], [100, 32, 90, 135, 135, 85, 40, 90],
+    rehab.map(r => [r.name, r.unit, rehabTimes(r), vitalsSegments(r, "In"), vitalsSegments(r, "Out"), fluidNutrient(r), r.status, r.notes]), "Rehab / Medical Monitoring"));
 
   heading(L, "9. Current Organization");
   const orgLines = flattenOrgFilled(org).map(item => `${"  ".repeat(item.depth || 0)}${item.title}: ${item.name}`);
