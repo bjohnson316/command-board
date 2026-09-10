@@ -4979,6 +4979,15 @@ function pdfEscape(str) {
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, "-")
     .replace(/[\u00B7\u2022]/g, "-")
+    // A true "°" glyph isn't safely achievable here — this hand-built
+    // PDF's fonts declare no /Encoding, and the byte-assembly path
+    // below would UTF-8-encode the character into two bytes rather
+    // than the single WinAnsiEncoding byte a real degree sign would
+    // need, risking garbled output rather than fixing it. Dropped
+    // entirely rather than substituted — "98.6°F" becomes "98.6F",
+    // which reads cleanly on its own without needing a stand-in
+    // character in its place.
+    .replace(/\u00B0/g, "")
     .replace(/\t/g, "  ")
     .replace(/[^\x20-\x7E]/g, "?")
     .replace(/\\/g, "\\\\")
