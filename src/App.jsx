@@ -4,7 +4,7 @@ import {
   Printer, Plus, X, Clock, ChevronRight, Trash2, Download,
   FolderOpen, AlertTriangle, Shield, CheckCircle2, ArrowRightLeft, Lock, GripVertical, GripHorizontal,
   Archive, RotateCcw, Layers, Star, Paperclip, FileText, Image as ImageIcon, KeyRound, Settings, Sun, Moon,
-  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown, ChevronLeft
+  Map as MapIcon, Crosshair, CloudSun, RefreshCw, Play, Pause, ChevronDown, ChevronLeft, Menu
 } from "lucide-react";
 import {
   loadIndex, saveIndex, loadIncidentBlobFresh, saveIncidentBlob,
@@ -7055,6 +7055,7 @@ function AppInner({ onLock, theme, toggleTheme }) {
   const [showChangePin, setShowChangePin] = useState(false);
   const [showAdminAuth, setShowAdminAuth] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showManageIncidentTypes, setShowManageIncidentTypes] = useState(false);
   // Lifted up from TabResources (rather than local state there) since
   // this now also needs to be reachable from the Admin menu, which is
@@ -7944,48 +7945,84 @@ function AppInner({ onLock, theme, toggleTheme }) {
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{incident.name || "Untitled Incident"}</span>
                 <span style={{ fontSize: 11, color: COLORS.muted }}>({incident.type})</span>
               </div>
+              {/* Kept directly in the header rather than the drawer
+                  below (unlike its own Stop/Resume control, which did
+                  move there) — how long the incident's been running
+                  is glanceable, always-relevant status, not an
+                  occasional action someone navigates to check. */}
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: COLORS.amber }}>
                 <Clock size={14} />
                 {fmtDuration((incident.pausedElapsedMs || 0) + (incident.opEnd ? 0 : Math.max(0, now - new Date(incident.opStart).getTime())))}
                 {incident.opEnd && <span style={{ color: COLORS.faint, fontSize: 10, marginLeft: 2 }}>STOPPED</span>}
               </div>
-              <Btn kind="ghost" icon={Clock}
-                onClick={() => {
-                  if (incident.opEnd) {
-                    // Resuming: start a fresh running segment. The time
-                    // already accumulated (pausedElapsedMs) is preserved
-                    // as-is — only opStart resets, as the reference point
-                    // for counting the NEW segment, not the total.
-                    setIncident({ ...incident, opStart: nowISO(), opEnd: null });
-                  } else {
-                    // Stopping: fold this segment's elapsed time into the
-                    // running total before freezing the display, instead
-                    // of discarding it (which is what the old opStart-only
-                    // reset on resume used to do).
-                    const segmentMs = Math.max(0, Date.now() - new Date(incident.opStart).getTime());
-                    setIncident({ ...incident, pausedElapsedMs: (incident.pausedElapsedMs || 0) + segmentMs, opEnd: nowISO() });
-                  }
-                }}
-                style={{ padding: "6px 11px", fontSize: 12.5 }}>
-                {incident.opEnd ? "Resume Clock" : "Stop Clock"}
-              </Btn>
               {!online && (
                 <span style={{ fontSize: 11, color: COLORS.amber, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.amber, display: "inline-block" }} />
                   offline — changes will sync when reconnected
                 </span>
               )}
-              <Btn kind="subtle" icon={FolderOpen} onClick={() => setShowLib(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Incidents</Btn>
-              <Btn kind="subtle" icon={Printer} onClick={() => downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments, assignmentPresets: presets.assignments, resourceColumnOrder })} style={{ padding: "6px 11px", fontSize: 12.5 }}>Print / Export</Btn>
-              <Btn kind="ghost" icon={Lock} onClick={onLock} style={{ padding: "6px 11px", fontSize: 12.5 }}>Lock</Btn>
-              <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={toggleTheme} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ padding: "6px 11px", fontSize: 12.5 }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
-              <Btn kind="ghost" icon={Settings} onClick={() => setShowAdminAuth(true)} style={{ padding: "6px 11px", fontSize: 12.5 }}>Admin</Btn>
               <span style={{ fontSize: 11, color: COLORS.faint, fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 5, visibility: saveState === "idle" ? "hidden" : "visible" }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: saveState === "saving" ? COLORS.amber : COLORS.teal, transition: "background-color 0.15s" }} />
                 Synced
               </span>
+              {/* Everything actually actionable (the clock's own
+                  control, navigation, export, locking, theme, admin)
+                  lives in the slide-out drawer below instead of
+                  cluttering this row directly — only always-relevant,
+                  glanceable status (incident name/type, offline state,
+                  sync state) stays visible here at all times. */}
+              <button onClick={() => setShowHeaderMenu(true)} title="Menu"
+                style={{ background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 5, color: COLORS.text, cursor: "pointer", padding: "7px 9px", display: "flex", alignItems: "center" }}>
+                <Menu size={18} />
+              </button>
             </div>
           </div>
+
+          {showHeaderMenu && (
+            <div onClick={() => setShowHeaderMenu(false)}
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100 }}>
+              <style>{`@keyframes cbHeaderMenuSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+              <div onClick={e => e.stopPropagation()}
+                style={{
+                  position: "absolute", top: 0, right: 0, bottom: 0, width: 280, maxWidth: "85vw",
+                  background: COLORS.panel, borderLeft: `1px solid ${COLORS.line}`, boxShadow: "-4px 0 16px rgba(0,0,0,0.4)",
+                  padding: 16, overflowY: "auto", animation: "cbHeaderMenuSlideIn 0.2s ease-out",
+                  display: "flex", flexDirection: "column", gap: 10,
+                }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <span style={{ fontFamily: "'Oswald', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 14 }}>Menu</span>
+                  <button onClick={() => setShowHeaderMenu(false)} style={{ background: "none", border: "none", color: COLORS.muted, cursor: "pointer" }}><X size={18} /></button>
+                </div>
+
+                <Btn kind="ghost" icon={Clock}
+                  onClick={() => {
+                    setShowHeaderMenu(false);
+                    if (incident.opEnd) {
+                      // Resuming: start a fresh running segment. The time
+                      // already accumulated (pausedElapsedMs) is preserved
+                      // as-is — only opStart resets, as the reference point
+                      // for counting the NEW segment, not the total.
+                      setIncident({ ...incident, opStart: nowISO(), opEnd: null });
+                    } else {
+                      // Stopping: fold this segment's elapsed time into the
+                      // running total before freezing the display, instead
+                      // of discarding it (which is what the old opStart-only
+                      // reset on resume used to do).
+                      const segmentMs = Math.max(0, Date.now() - new Date(incident.opStart).getTime());
+                      setIncident({ ...incident, pausedElapsedMs: (incident.pausedElapsedMs || 0) + segmentMs, opEnd: nowISO() });
+                    }
+                  }}
+                  style={{ width: "100%", justifyContent: "center" }}>
+                  {incident.opEnd ? "Resume Clock" : "Stop Clock"}
+                </Btn>
+                <Btn kind="subtle" icon={FolderOpen} onClick={() => { setShowHeaderMenu(false); setShowLib(true); }} style={{ width: "100%", justifyContent: "center" }}>Incidents</Btn>
+                <Btn kind="subtle" icon={Printer} onClick={() => { setShowHeaderMenu(false); downloadPacketPdf({ incident, resources, comms, org, safety, ics208, ics208hm, ics209, ics206, rehab, logs, formsUsed, mapData, attachments, assignmentPresets: presets.assignments, resourceColumnOrder }); }} style={{ width: "100%", justifyContent: "center" }}>Print / Export</Btn>
+                <Btn kind="ghost" icon={Lock} onClick={() => { setShowHeaderMenu(false); onLock(); }} style={{ width: "100%", justifyContent: "center" }}>Lock</Btn>
+                <Btn kind="ghost" icon={theme === "dark" ? Sun : Moon} onClick={() => { setShowHeaderMenu(false); toggleTheme(); }} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} style={{ width: "100%", justifyContent: "center" }}>{theme === "dark" ? "Light" : "Dark"}</Btn>
+                <Btn kind="ghost" icon={Settings} onClick={() => { setShowHeaderMenu(false); setShowAdminAuth(true); }} style={{ width: "100%", justifyContent: "center" }}>Admin</Btn>
+              </div>
+            </div>
+          )}
 
           {/* TAB NAV */}
           <div style={{ display: "flex", gap: 2, padding: "0 16px", overflowX: "auto" }}>
